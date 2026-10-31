@@ -18,44 +18,39 @@ Sen bir denizcilik evrak analiz uzmanısın. Aşağıdaki belgeyi incele ve sade
 Cevapta sadece saf JSON ver, markdown (```) veya fazladan hiçbir açıklama ekleme.
 """
 
-def get_available_model(api_key: str) -> genai.GenerativeModel:
-    """Ücretsiz kotası (Free Tier) açık olan Flash modellerini öncelikli seçer."""
-    genai.configure(api_key=api_key)
-    
-    # Ücretsiz planda çalışan hızlı ve geniş kotalı Flash modelleri önceliklidir
-    preferred_flash_models = [
-        "gemini-2.5-flash",
-        "gemini-1.5-flash",
-        "gemini-flash"
-    ]
-    
-    try:
-        supported_models = [
-            m.name for m in genai.list_models() 
-            if "generateContent" in m.supported_generation_methods
-        ]
-        
-        # Öncelikli olarak Pro olmayan Flash modellerini ara
-        for pref in preferred_flash_models:
-            for sm in supported_models:
-                if pref in sm and "pro" not in sm.lower():
-                    return genai.GenerativeModel(sm)
-                    
-        # Flash bulunamazsa Pro olmayan ilk modeli seç
-        for sm in supported_models:
-            if "pro" not in sm.lower():
-                return genai.GenerativeModel(sm)
-    except Exception:
-        pass
-        
-    return genai.GenerativeModel("gemini-1.5-flash")
+# Google'ın önerdiği en güncel Flash modelleri sırasıyla denenir
+CANDIDATE_MODELS = [
+    "gemini-3.8-flash",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash"
+]
 
 def extract_with_gemini(data: bytes, mime: str, api_key: str, model_name: str) -> str:
-    """Gemini API ile belgeyi analiz eder."""
-    model = get_available_model(api_key)
+    """Gemini API ile belgeyi analiz eder, güncel modelleri sırayla dener."""
+    genai.configure(api_key=api_key)
     content_parts = [PROMPT, {"mime_type": mime, "data": data}]
-    response = model.generate_content(content_parts)
-    return response.text
+    
+    # Secrets'tan gelen model adı varsa listeye en başa ekle
+    models_to_try = []
+    if model_name:
+        clean = model_name.replace("models/", "").strip()
+        if clean not in models_to_try:
+            models_to_try.append(clean)
+    for m in CANDIDATE_MODELS:
+        if m not in models_to_try:
+            models_to_try.append(m)
+
+    last_error = None
+    for mod_name in models_to_try:
+        try:
+            model = genai.GenerativeModel(mod_name)
+            response = model.generate_content(content_parts)
+            return response.text
+        except Exception as e:
+            last_error = e
+            continue
+
+    raise last_error if last_error else RuntimeError("Kullanılabilir bir Gemini modeli bulunamadı.")
 
 PROVIDERS: Dict[str, Callable[[bytes, str, str, str], str]] = {
     "gemini": extract_with_gemini
