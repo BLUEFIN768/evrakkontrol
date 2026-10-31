@@ -19,37 +19,35 @@ Cevapta sadece saf JSON ver, markdown (```) veya fazladan hiçbir açıklama ekl
 """
 
 def get_available_model(api_key: str) -> genai.GenerativeModel:
-    """Hesabın desteklediği generateContent uyumlu çalışan bir modeli dinamik seçer."""
+    """Ücretsiz kotası (Free Tier) açık olan Flash modellerini öncelikli seçer."""
     genai.configure(api_key=api_key)
     
-    # 1. Tercih edilen modeller
-    preferred = [
+    # Ücretsiz planda çalışan hızlı ve geniş kotalı Flash modelleri önceliklidir
+    preferred_flash_models = [
+        "gemini-2.5-flash",
         "gemini-1.5-flash",
-        "gemini-1.5-pro",
-        "gemini-1.0-pro",
-        "gemini-pro"
+        "gemini-flash"
     ]
     
-    # Canlı model listesini çek
     try:
         supported_models = [
             m.name for m in genai.list_models() 
             if "generateContent" in m.supported_generation_methods
         ]
         
-        # Tercih edilenlerden biri var mı?
-        for pref in preferred:
+        # Öncelikli olarak Pro olmayan Flash modellerini ara
+        for pref in preferred_flash_models:
             for sm in supported_models:
-                if pref in sm:
+                if pref in sm and "pro" not in sm.lower():
                     return genai.GenerativeModel(sm)
                     
-        # Yoksa listedeki ilk uygun modeli al
-        if supported_models:
-            return genai.GenerativeModel(supported_models[0])
+        # Flash bulunamazsa Pro olmayan ilk modeli seç
+        for sm in supported_models:
+            if "pro" not in sm.lower():
+                return genai.GenerativeModel(sm)
     except Exception:
         pass
         
-    # Liste alınamazsa doğrudan flash modelini dene
     return genai.GenerativeModel("gemini-1.5-flash")
 
 def extract_with_gemini(data: bytes, mime: str, api_key: str, model_name: str) -> str:
