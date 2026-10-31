@@ -8,7 +8,6 @@ from PIL import Image
 def get_gemini_model():
     """
     Secrets içindeki anahtarı ve modeli hazırlar.
-    v1beta 404 hatalarını önlemek için model adını normalize eder.
     """
     api_key = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY", ""))
     if not api_key:
@@ -26,15 +25,23 @@ def get_gemini_model():
     except Exception:
         return genai.GenerativeModel(model_name="gemini-1.5-flash")
 
-def process_document(file_bytes_or_upload, prompt=None):
+def process_document(*args, **kwargs):
     """
-    app.py tarafından beklenen ana fonksiyon.
-    Belge görselini veya PDF sayfasını Gemini ile okur ve JSON / dict döndürür.
+    app.py'den gelen tüm pozisyonel ve anahtar kelime argümanlarını (*args, **kwargs) kabul eder.
+    Böylece parametre sayısı uyumsuzluğu hatası tamamen engellenir.
     """
-    model = get_gemini_model()
-
+    # İlk argüman genellikle dosya/dosya listesidir
+    file_input = args[0] if len(args) > 0 else kwargs.get("file", kwargs.get("document", None))
+    
+    # İkinci veya sonraki argümanlar (prompt, model, api_key vb.)
+    prompt = None
+    for item in args[1:]:
+        if isinstance(item, str):
+            prompt = item
+            break
+            
     if prompt is None:
-        prompt = """
+        prompt = kwargs.get("prompt", """
         Bu belge bir denizcilik evrakıdır (Pasaport, Gemiadamı Cüzdanı, STCW Sertifikası, GMDSS vb.).
         Belgedeki bilgileri analiz et ve SADECE geçerli bir JSON objesi döndür.
         Anahtarlar:
@@ -44,21 +51,25 @@ def process_document(file_bytes_or_upload, prompt=None):
         - DuzenlenmeTarihi
         - GecerlilikTarihi
         - DuzenleyenMakam
-        """
+        """)
+
+    model = get_gemini_model()
 
     try:
-        if hasattr(file_bytes_or_upload, "getvalue"):
-            raw_data = file_bytes_or_upload.getvalue()
-        elif isinstance(file_bytes_or_upload, bytes):
-            raw_data = file_bytes_or_upload
+        if hasattr(file_input, "getvalue"):
+            raw_data = file_input.getvalue()
+        elif isinstance(file_input, bytes):
+            raw_data = file_input
+        elif hasattr(file_input, "read"):
+            raw_data = file_input.read()
         else:
-            raw_data = file_bytes_or_upload.read()
+            raw_data = file_input
 
         image = Image.open(io.BytesIO(raw_data))
         response = model.generate_content([prompt, image])
         text = response.text.strip()
 
-        # Markdown etiketlerini temizle
+        # Markdown etiketlerini ayıkla
         if text.startswith("```json"):
             text = text[7:]
         if text.startswith("```"):
@@ -71,7 +82,7 @@ def process_document(file_bytes_or_upload, prompt=None):
         return {
             "hata": False,
             "raw_text": str(e),
-            "mesaj": "Belge okundu ancak yapılandırılmış JSON formatına dönüştürülemedi."
+            "mesaj": "Belge okundu ancak JSON formatına dönüştürülemedi."
         }
 
 # Geriye dönük uyumluluk takma adları
