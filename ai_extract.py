@@ -18,39 +18,17 @@ Sen bir denizcilik evrak analiz uzmanısın. Aşağıdaki belgeyi incele ve sade
 Cevapta sadece saf JSON ver, markdown (```) veya fazladan hiçbir açıklama ekleme.
 """
 
-# Google'ın önerdiği en güncel Flash modelleri sırasıyla denenir
-CANDIDATE_MODELS = [
-    "gemini-3.8-flash",
-    "gemini-2.0-flash",
-    "gemini-1.5-flash"
-]
-
 def extract_with_gemini(data: bytes, mime: str, api_key: str, model_name: str) -> str:
-    """Gemini API ile belgeyi analiz eder, güncel modelleri sırayla dener."""
+    """Doğrudan aktif olan gemini-3.8-flash modelini çağırır."""
     genai.configure(api_key=api_key)
     content_parts = [PROMPT, {"mime_type": mime, "data": data}]
     
-    # Secrets'tan gelen model adı varsa listeye en başa ekle
-    models_to_try = []
-    if model_name:
-        clean = model_name.replace("models/", "").strip()
-        if clean not in models_to_try:
-            models_to_try.append(clean)
-    for m in CANDIDATE_MODELS:
-        if m not in models_to_try:
-            models_to_try.append(m)
-
-    last_error = None
-    for mod_name in models_to_try:
-        try:
-            model = genai.GenerativeModel(mod_name)
-            response = model.generate_content(content_parts)
-            return response.text
-        except Exception as e:
-            last_error = e
-            continue
-
-    raise last_error if last_error else RuntimeError("Kullanılabilir bir Gemini modeli bulunamadı.")
+    # Google API'nin zorunlu kıldığı tek aktif model
+    active_model_name = "gemini-3.8-flash"
+    
+    model = genai.GenerativeModel(active_model_name)
+    response = model.generate_content(content_parts)
+    return response.text
 
 PROVIDERS: Dict[str, Callable[[bytes, str, str, str], str]] = {
     "gemini": extract_with_gemini
