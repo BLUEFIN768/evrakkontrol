@@ -3,84 +3,62 @@ from docx import Document
 from typing import List, Dict, Optional
 from crew_core import Result
 
-# --- WORD EŞLEŞTİRME SÖZLÜĞÜ (Madde 5) ---
-# 35-102.docx tablosundaki satır indeksleri (0'dan başlar).
-# Şablon değişirse bu indeksler kontrol edilmelidir.
-word_answers = {
-    "PASSPORT": 4,
-    "SEAMAN_BOOK": 5,
-    "MEDICAL_CERT": 6,
-    "YELLOW_FEVER": 7,
-    "BASIC_SAFETY": 10,
-    # Diğer belgeler Word tablosundaki satırlarına göre eklenecek
+# 35-102.docx tablosundaki satır indeksleri
+WORD_ROW_MAP = {
+    "PASSPORT": 5,
+    "COMPETENCY": 5,
+    "BASIC_SAFETY": 6,
+    "SEAMAN_BOOK": 6,
+    "GMDSS": 7,
+    "CRIMINAL_RECORD": 11,
+    "MILITARY_STATUS": 12,
+    "RESIDENCE": 13,
+    "ID_CARD": 14,
+    "MEDICAL_CERT": 17,
+    "YELLOW_FEVER": 18
 }
 
-def fill_excel(template_path: str, output_path: str, results: List[Result], personel_info: dict):
-    """
-    35-101 Excel dosyasını doldurur.
-    Madde 3.2: Sadece C6, N6, C8, N8 ve sağdaki yeni sütunlara (Y:AD) yazar. 
-    Türkçe açıklama satırlarına dokunmaz.
-    """
+def fill_excel(template_path: str, output_stream, results: List[Result], personel_info: dict):
+    """35-101 Excel dosyasını doldurur."""
     wb = openpyxl.load_workbook(template_path)
-    ws = wb["DOC_MATRIX"] # Çalışma sayfası adını şablona göre ayarlayın
+    ws = wb["DOC_MATRIX"] if "DOC_MATRIX" in wb.sheetnames else wb.active
 
-    # Temel personel bilgilerini belirli hücrelere yazıyoruz (Madde 3.2)
-    ws["C6"] = personel_info.get("name", "")
-    ws["N6"] = personel_info.get("rank", "")
-    ws["C8"] = personel_info.get("date", "")
-    ws["N8"] = personel_info.get("vessel", "")
+    # Orijinal 35-101.xlsx başlık hücreleri
+    ws["H6"] = personel_info.get("name", "")
+    ws["B6"] = personel_info.get("vessel", "")
+    ws["B8"] = personel_info.get("date", "")
+    ws["H8"] = personel_info.get("rank", "")
 
-    # Sonuçları Y:AD sütunlarına yazma mantığı
-    # Gerçek şablondaki ITEM_SIGNATURES satırlarına göre ilgili Result'ları sağ sütunlara işleyeceğiz.
-    # Örnek: ws[f"Y{row_index}"] = result.status
-    
-    wb.save(output_path)
+    wb.save(output_stream)
 
-def fill_word(template_path: str, output_path: str, results: List[Result], personel_info: dict, operator_name: str):
-    """
-    35-102 Word dosyasını doldurur.
-    Madde 3.2: Yalnız değer hücreleri (satır 0-2, hücre 3 ve 9) ve Yes/No/N/A kutuları.
-    Madde 3.3: Onay/imza alanlarına (satır 29-30) dokunulmaz, sadece operatör adı yazılır[cite: 1].
-    """
+def fill_word(template_path: str, output_stream, results: List[Result], personel_info: dict, operator_name: str):
+    """35-102 Word dosyasını doldurur."""
     doc = Document(template_path)
-    table = doc.tables[0] # Formun ilk tablosu
+    table = doc.tables[0]
 
-    # 1. Üst Bilgiler (Satır 0-2, Hücre 3 ve 9)[cite: 1]
-    table.rows[0].cells[3].text = personel_info.get("name", "")
-    table.rows[0].cells[9].text = personel_info.get("rank", "")
-    table.rows[1].cells[3].text = personel_info.get("vessel", "")
-    table.rows[1].cells[9].text = personel_info.get("date", "")
-    
-    # Sonuçları (Results) bir sözlüğe çevirelim ki kolay arayalım
+    # Başlık bilgileri (Satır 0, 1, 2)
+    table.rows[0].cells[3].text = personel_info.get("vessel", "")
+    table.rows[0].cells[9].text = personel_info.get("date", "")
+    table.rows[1].cells[3].text = personel_info.get("name", "")
+    table.rows[2].cells[3].text = personel_info.get("rank", "")
+
     results_dict = {r.code: r for r in results}
 
-    # 2. Belge Kontrol Kutuları (Yes / No / N/A)
-    for code, row_index in word_answers.items():
+    # Tablo kutularını işaretle (Satır 5-25)
+    for code, row_index in WORD_ROW_MAP.items():
         if row_index >= len(table.rows):
-            continue # Şablon dışına çıkmayı engelle
-            
-        result = results_dict.get(code)
-        
-        # Madde 3.4: Kanıtsız "Yes" yok. Kanıt yoksa kutu boş kalır (None)[cite: 1].
-        if not result or not result.evidence_used or not result.evidence_used.verified:
-            # Kanıt yok veya doğrulanmamış -> Boş bırak
+            continue
+        res = results_dict.get(code)
+        if not res or not res.evidence_used or not res.evidence_used.verified:
             continue
             
-        if result.status == "OK":
-            # Sadece onaylı ve geçerli belgelerde Yes sütununa (örneğin 3. hücre) "X" koyuyoruz
-            table.rows[row_index].cells[3].text = "X"
-        elif result.status == "MISSING":
-            # No sütununa (örneğin 4. hücre) "X" koy
-            table.rows[row_index].cells[4].text = "X"
-            
-        # N/A durumu için (Atamaya bağlı 'D' olup belge olmayanlar)
-        if result and result.status == "OK" and result.evidence_used is None:
-            table.rows[row_index].cells[5].text = "X" # N/A hücresi
+        if res.status == "OK":
+            table.rows[row_index].cells[10].text = "Yes [X]  No [ ]  N/A [ ]"
+        elif res.status == "MISSING":
+            table.rows[row_index].cells[10].text = "Yes [ ]  No [X]  N/A [ ]"
 
-    # 3. Alt Kısım - Onay ve İmza (Madde 3.3)[cite: 1]
-    # Sadece operatör adını yaz, Approved/Rejected veya imza/tarih kısımlarına dokunma[cite: 1].
-    # Örneğin 29. satırın operatör adı hücresi (şablona göre indeks güncellenebilir)
+    # Operatör imza alanı
     if len(table.rows) > 29:
         table.rows[29].cells[3].text = operator_name
 
-    doc.save(output_path)
+    doc.save(output_stream)
