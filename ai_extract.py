@@ -1,6 +1,6 @@
 import json
 import re
-from typing import List, Dict, Callable
+from typing import List, Dict, Callable, Optional
 from datetime import datetime
 import google.generativeai as genai
 from crew_core import Evidence
@@ -8,7 +8,7 @@ from crew_core import Evidence
 CODES = ["PASSPORT", "SEAMAN_BOOK", "MEDICAL_CERT", "YELLOW_FEVER", "BASIC_SAFETY", "GMDSS", "COMPETENCY"]
 
 PROMPT = f"""
-Sen bir denizcilik evrak analiz uzmanısın. Aşağıdaki belgeyi (PDF veya Görsel) incele ve sadece geçerli bir JSON çıktısı üret:
+Sen bir denizcilik evrak analiz uzmanısın. Aşağıdaki belgeyi incele ve sadece geçerli bir JSON çıktısı üret:
 {{
   "code": "Aşağıdaki listeden en uygun belge kodunu seç: {', '.join(CODES)}",
   "document_no": "Belge numarası veya TCKN",
@@ -18,26 +18,46 @@ Sen bir denizcilik evrak analiz uzmanısın. Aşağıdaki belgeyi (PDF veya Gör
 Cevapta sadece saf JSON ver, markdown (```) veya fazladan hiçbir açıklama ekleme.
 """
 
-def extract_with_gemini(data: bytes, mime: str, api_key: str, model_name: str) -> str:
-    """Gemini API ile belgeyi analiz eder."""
+def get_available_model(api_key: str) -> genai.GenerativeModel:
+    """Hesabın desteklediği generateContent uyumlu çalışan bir modeli dinamik seçer."""
     genai.configure(api_key=api_key)
     
-    # Model adı güvenliği
-    target_model = model_name if model_name else "gemini-1.5-flash"
-    if target_model.startswith("models/"):
-        target_model = target_model.replace("models/", "")
-        
+    # 1. Tercih edilen modeller
+    preferred = [
+        "gemini-1.5-flash",
+        "gemini-1.5-pro",
+        "gemini-1.0-pro",
+        "gemini-pro"
+    ]
+    
+    # Canlı model listesini çek
     try:
-        model = genai.GenerativeModel(target_model)
-        content_parts = [PROMPT, {"mime_type": mime, "data": data}]
-        response = model.generate_content(content_parts)
-        return response.text
+        supported_models = [
+            m.name for m in genai.list_models() 
+            if "generateContent" in m.supported_generation_methods
+        ]
+        
+        # Tercih edilenlerden biri var mı?
+        for pref in preferred:
+            for sm in supported_models:
+                if pref in sm:
+                    return genai.GenerativeModel(sm)
+                    
+        # Yoksa listedeki ilk uygun modeli al
+        if supported_models:
+            return genai.GenerativeModel(supported_models[0])
     except Exception:
-        # Alternatif fallback
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        content_parts = [PROMPT, {"mime_type": mime, "data": data}]
-        response = model.generate_content(content_parts)
-        return response.text
+        pass
+        
+    # Liste alınamazsa doğrudan flash modelini dene
+    return genai.GenerativeModel("gemini-1.5-flash")
+
+def extract_with_gemini(data: bytes, mime: str, api_key: str, model_name: str) -> str:
+    """Gemini API ile belgeyi analiz eder."""
+    model = get_available_model(api_key)
+    content_parts = [PROMPT, {"mime_type": mime, "data": data}]
+    response = model.generate_content(content_parts)
+    return response.text
 
 PROVIDERS: Dict[str, Callable[[bytes, str, str, str], str]] = {
     "gemini": extract_with_gemini
@@ -54,25 +74,22 @@ def parse_date(date_str: Optional[str]) -> Optional[datetime]:
     return None
 
 def process_document(data: bytes, mime: str, provider_name: str, api_key: str, model_name: str) -> Evidence:
-    """Seçilen AI sağlayıcısı ile evrakı okur ve Evidence nesnesi oluşturur."""
+    """Evrakı okur ve Evidence nesnesi oluşturur."""
     if provider_name not in PROVIDERS:
         raise ValueError(f"Desteklenmeyen AI sağlayıcısı: {provider_name}")
         
     extract_func = PROVIDERS[provider_name]
     raw_response = extract_func(data, mime, api_key, model_name)
     
-    # JSON bloklarını temizle
     clean_json = re.sub(r"```(json)?", "", raw_response).strip()
     
     try:
         parsed_data = json.loads(clean_json)
     except Exception:
-        # Fallback basit eşleme
         parsed_data = {"code": "UNKNOWN", "issue_date": None, "expiry_date": None}
 
     code = parsed_data.get("code", "UNKNOWN")
     if code not in CODES:
-        # Metin içi tahmin
         for c in CODES:
             if c in str(code).upper():
                 code = c
