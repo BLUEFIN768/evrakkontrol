@@ -46,7 +46,7 @@ with tab1:
     with col2:
         p_rank = st.text_input("Rütbe (Şablonla eşleşen)")
         p_vessel = st.text_input("Gemi Adı")
-        is_tanker = st.checkbox("Gemi Tanker mi?") # Madde 4
+        is_tanker = st.checkbox("Gemi Tanker mi?")  # Madde 4
         
     operator_name = st.text_input("Operatör Adı (İmza için)")
 
@@ -59,16 +59,19 @@ with tab2:
     if uab_file and st.button("UAB Oku"):
         st.info("UAB Okuma Modülü tetiklendi. (PDF parse mantığı crew_core.py içine eklendiğinde burası aktifleşecek)")
         
-    # 2. Yapay Zeka ile Manuel Evrak Yükleme
-    ai_file = st.file_uploader("Yapay Zeka için Evrak (Resim)", type=["jpg", "png", "jpeg"])
+    # 2. Yapay Zeka ile Manuel Evrak Yükleme (PDF ve Resim formatları eklendi)
+    ai_file = st.file_uploader(
+        "Yapay Zeka için Evrak (Resim veya PDF)", 
+        type=["jpg", "png", "jpeg", "pdf"]
+    )
     if ai_file and st.button("Yapay Zeka ile Analiz Et"):
         try:
             ai_provider = st.secrets["AI_PROVIDER"]
             api_key = st.secrets["GEMINI_API_KEY"]
-            model_name = st.secrets.get("AI_MODEL", "gemini-1.5-pro-latest")
+            model_name = st.secrets.get("AI_MODEL", "gemini-1.5-flash")
             
             file_bytes = ai_file.getvalue()
-            mime_type = ai_file.type
+            mime_type = ai_file.type if ai_file.type else ("application/pdf" if ai_file.name.lower().endswith(".pdf") else "image/jpeg")
             
             with st.spinner('Yapay Zeka evrakı analiz ediyor...'):
                 evidence = process_document(file_bytes, mime_type, ai_provider, api_key, model_name)
@@ -99,7 +102,6 @@ with tab3:
             st.error(f"Hata: Kural kaynağı {excel_template_path} bulunamadı!")
         else:
             try:
-                # crew_core.py içindeki evaluate fonksiyonunu doğrudan çağırıyoruz
                 st.session_state.results = evaluate(
                     evidences=st.session_state.evidences, 
                     rank=p_rank, 
@@ -115,7 +117,14 @@ with tab3:
                     elif r.status in ["REVIEW", "EXPIRED", "MISSING"]:
                         st.write(f"🔴 **{r.code}**: {r.message} ({r.status})")
             except Exception as e:
-                st.error(f"Değerlendirme sırasında hata oluştu: {str(e)}")
+                err_msg = str(e)
+                if "DOC_MATRIX" in err_msg:
+                    st.error(
+                        "Excel Hatası: 'templates/35-101.xlsx' dosyasında 'DOC_MATRIX' adında bir sekme bulunamadı. "
+                        "Lütfen Excel dosyanızdaki kural sayfasının adını tam olarak 'DOC_MATRIX' yapıp GitHub'a yükleyin."
+                    )
+                else:
+                    st.error(f"Değerlendirme sırasında hata oluştu: {err_msg}")
 
 # --- SEKME 4: ÇIKTI AL ---
 with tab4:
@@ -140,18 +149,26 @@ with tab4:
                 st.error("Hata: 'templates' klasöründe orijinal 35-101.xlsx veya 35-102.docx bulunamadı!")
             else:
                 try:
-                    # RAM üzerinde (BytesIO) dosyaları oluşturma - Disk kullanımını engeller
                     excel_io = io.BytesIO()
                     word_io = io.BytesIO()
                     
-                    # fillers.py fonksiyonları çalışıyor
                     fill_excel(excel_template, excel_io, st.session_state.results, personel_info)
                     fill_word(word_template, word_io, st.session_state.results, personel_info, operator_name)
                     
                     st.success("Dosyalar başarıyla bellekte oluşturuldu! Aşağıdan indirebilirsiniz.")
                     
-                    st.download_button("35-101 İndir (Excel)", data=excel_io.getvalue(), file_name=f"35-101_{p_name}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-                    st.download_button("35-102 İndir (Word)", data=word_io.getvalue(), file_name=f"35-102_{p_name}.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+                    st.download_button(
+                        "35-101 İndir (Excel)", 
+                        data=excel_io.getvalue(), 
+                        file_name=f"35-101_{p_name}.xlsx", 
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+                    st.download_button(
+                        "35-102 İndir (Word)", 
+                        data=word_io.getvalue(), 
+                        file_name=f"35-102_{p_name}.docx", 
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    )
                 
                 except Exception as e:
                     st.error(f"Dosya oluşturulurken hata: {str(e)}")
