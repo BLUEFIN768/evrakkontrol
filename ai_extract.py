@@ -1,5 +1,6 @@
 import json
 import re
+import time
 from typing import List, Dict, Callable, Optional
 from datetime import datetime
 import google.generativeai as genai
@@ -19,16 +20,30 @@ Cevapta sadece saf JSON ver, markdown (```) veya fazladan hiçbir açıklama ekl
 """
 
 def extract_with_gemini(data: bytes, mime: str, api_key: str, model_name: str) -> str:
-    """Doğrudan aktif olan gemini-3.8-flash modelini çağırır."""
+    """Gemini API ile belgeyi analiz eder, 429 kota limitinde otomatik bekleyip yeniden dener."""
     genai.configure(api_key=api_key)
     content_parts = [PROMPT, {"mime_type": mime, "data": data}]
     
-    # Google API'nin zorunlu kıldığı tek aktif model
     active_model_name = "gemini-3.8-flash"
-    
     model = genai.GenerativeModel(active_model_name)
-    response = model.generate_content(content_parts)
-    return response.text
+    
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            response = model.generate_content(content_parts)
+            # Google'ın dakikalık 5 istek limitine takılmamak için her istek sonrasına güvenli bekleme
+            time.sleep(12)
+            return response.text
+        except Exception as e:
+            err_str = str(e)
+            if "429" in err_str or "quota" in err_str.lower():
+                # Google retry_delay olarak genelde 30-50 saniye ister
+                wait_time = 45 if attempt == 0 else 60
+                time.sleep(wait_time)
+            else:
+                raise e
+
+    raise RuntimeError("Dakikalık kota sınırı nedeniyle istek tamamlanamadı, lütfen 1 dakika sonra tekrar deneyin.")
 
 PROVIDERS: Dict[str, Callable[[bytes, str, str, str], str]] = {
     "gemini": extract_with_gemini
