@@ -1,89 +1,70 @@
-import os
 import json
-import io
-import streamlit as st
 import google.generativeai as genai
-from PIL import Image
+from typing import List, Dict, Callable
+from datetime import datetime
+from crew_core import Evidence
 
-def get_gemini_model():
-    """
-    Secrets içindeki anahtarı ve modeli hazırlar.
-    """
-    api_key = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY", ""))
-    if not api_key:
-        raise ValueError("GEMINI_API_KEY Streamlit Secrets alanında bulunamadı.")
+# Madde 5: Yeni belge türü eklenecekse buradaki CODES listesi de güncellenir.
+CODES = ["PASSPORT", "SEAMAN_BOOK", "MEDICAL_CERT", "YELLOW_FEVER", "BASIC_SAFETY"]
 
+# AI'ın her sağlayıcıda aynı JSON şemasında çıktı vermesi için sabit istem (Madde 5).
+PROMPT = f"""
+Sen bir denizcilik evrak analiz asistanısın. Aşağıdaki belgeyi incele ve JSON formatında şu bilgileri çıkar:
+- "code": Belgenin türü ({', '.join(CODES)} listesinden en uygun olanı seç).
+- "document_no": Belge numarası.
+- "issue_date": Veriliş tarihi (YYYY-MM-DD formatında).
+- "expiry_date": Bitiş/Geçerlilik tarihi (YYYY-MM-DD formatında, yoksa null).
+
+Sadece geçerli bir JSON formatında çıktı ver.
+"""
+
+def extract_with_gemini(data: bytes, mime: str, api_key: str, model_name: str) -> str:
+    """Gemini API çağrısı yapar ve JSON string döndürür."""
     genai.configure(api_key=api_key)
-
-    configured_model = st.secrets.get("AI_MODEL", "gemini-1.5-flash")
-    clean_name = configured_model.replace("models/", "").strip()
-    if clean_name == "gemini-1.5-pro-latest":
-        clean_name = "gemini-1.5-pro"
-
-    try:
-        return genai.GenerativeModel(model_name=clean_name)
-    except Exception:
-        return genai.GenerativeModel(model_name="gemini-1.5-flash")
-
-def process_document(*args, **kwargs):
-    """
-    app.py'den gelen tüm pozisyonel ve anahtar kelime argümanlarını (*args, **kwargs) kabul eder.
-    Böylece parametre sayısı uyumsuzluğu hatası tamamen engellenir.
-    """
-    # İlk argüman genellikle dosya/dosya listesidir
-    file_input = args[0] if len(args) > 0 else kwargs.get("file", kwargs.get("document", None))
+    model = genai.GenerativeModel(model_name)
     
-    # İkinci veya sonraki argümanlar (prompt, model, api_key vb.)
-    prompt = None
-    for item in args[1:]:
-        if isinstance(item, str):
-            prompt = item
-            break
-            
-    if prompt is None:
-        prompt = kwargs.get("prompt", """
-        Bu belge bir denizcilik evrakıdır (Pasaport, Gemiadamı Cüzdanı, STCW Sertifikası, GMDSS vb.).
-        Belgedeki bilgileri analiz et ve SADECE geçerli bir JSON objesi döndür.
-        Anahtarlar:
-        - BelgeTuru
-        - AdSoyad
-        - BelgeNo
-        - DuzenlenmeTarihi
-        - GecerlilikTarihi
-        - DuzenleyenMakam
-        """)
+    prompt_parts = [
+        PROMPT,
+        {"mime_type": mime, "data": data}
+    ]
+    
+    response = model.generate_content(prompt_parts)
+    return response.text
 
-    model = get_gemini_model()
+# Madde 5: Yeni AI sağlayıcı ekleneceğinde fonksiyon (data, mime, api_key, model) -> str imzasını taşımalıdır.
+PROVIDERS: Dict[str, Callable[[bytes, str, str, str], str]] = {
+    "gemini": extract_with_gemini
+    # İleride Anthropic eklendiğinde: "anthropic": extract_with_anthropic
+}
 
-    try:
-        if hasattr(file_input, "getvalue"):
-            raw_data = file_input.getvalue()
-        elif isinstance(file_input, bytes):
-            raw_data = file_input
-        elif hasattr(file_input, "read"):
-            raw_data = file_input.read()
-        else:
-            raw_data = file_input
-
-        image = Image.open(io.BytesIO(raw_data))
-        response = model.generate_content([prompt, image])
-        text = response.text.strip()
-
-        # Markdown etiketlerini ayıkla
-        if text.startswith("```json"):
-            text = text[7:]
-        if text.startswith("```"):
-            text = text[3:]
-        if text.endswith("```"):
-            text = text[:-3]
-
-        return json.loads(text.strip())
-    except Exception as e:
-        return {
-            "hata": False,
-            "raw_text": str(e),
-            "mesaj": "Belge okundu ancak JSON formatına dönüştürülemedi."
-        }
-
-# Geriye dönük uyumluluk takma adları
-analyze_document_image = process_document
+def process_document(data: bytes, mime: str, provider_name: str, api_key: str, model_name: str) -> Evidence:
+    """
+    Seçilen sağlayıcı ile resmi okur, JSON'ı parse eder ve Evidence objesine çevirir.
+    Madde 3.5: AI çıktısı verified=False başlar. Resmî doğrulama yalnız UAB PDF + operatör onayı ile olur[cite: 1].
+    """
+    if provider_name not in PROVIDERS:
+        raise ValueError(f"Desteklenmeyen AI sağlayıcısı: {provider_name}")
+        
+    extract_func = PROVIDERS[provider_name]
+    raw_json_str = extract_func(data, mime, api_key, model_name)
+    
+    # Markdown bloklarını temizle (```json ... ```)
+    clean_json_str = raw_json_str.replace("```json", "").replace("```", "").strip()
+    parsed_data = json.loads(clean_json_str)
+    
+    issue_dt = None
+    if parsed_data.get("issue_date"):
+        issue_dt = datetime.strptime(parsed_data["issue_date"], "%Y-%m-%d")
+        
+    expiry_dt = None
+    if parsed_data.get("expiry_date"):
+        expiry_dt = datetime.strptime(parsed_data["expiry_date"], "%Y-%m-%d")
+    
+    return Evidence(
+        code=parsed_data.get("code", "UNKNOWN"),
+        document_no=parsed_data.get("document_no"),
+        issue_date=issue_dt,
+        expiry_date=expiry_dt,
+        verified=False, # Güvenlik kilidi (Madde 3.5)[cite: 1]
+        raw_text=clean_json_str
+    )
