@@ -2,9 +2,11 @@ import streamlit as st
 import io
 import os
 from datetime import datetime
-from crew_core import Evidence, evaluate, verify_identity
+from crew_core import Evidence, evaluate
 from ai_extract import process_document
 from fillers import fill_excel, fill_word
+
+st.set_page_config(page_title="Evrak Kontrol Portalı v2", layout="wide")
 
 def check_password():
     if "password_correct" not in st.session_state:
@@ -33,83 +35,80 @@ if "evidences" not in st.session_state:
 if "results" not in st.session_state:
     st.session_state.results = []
 
-# --- SEKME 1: PERSONEL BİLGİLERİ ---
+# --- SEKME 1: PERSONEL VE RÜTBE BİLGİLERİ ---
 with tab1:
     st.header("Personel Kimlik & Atama Bilgileri")
     col1, col2 = st.columns(2)
     with col1:
         p_name = st.text_input("Ad Soyad", value="CAN TANGUÇ")
-        p_tckn = st.text_input("TCKN")
-        p_cuzdan = st.text_input("Cüzdan No")
+        p_tckn = st.text_input("TCKN", value="12345678901")
+        p_cuzdan = st.text_input("Cüzdan No", value="G000123")
     with col2:
-        p_rank = st.text_input("Rütbe (Master, Chief officer vb.)", value="Master")
-        p_vessel = st.text_input("Gemi Adı")
-        is_tanker = st.checkbox("Gemi Tanker mi?")
+        p_rank = st.selectbox(
+            "Rütbe / Görev", 
+            ["Master", "Chief Officer", "2nd Officer", "3rd Officer", "Chief Engineer", "2nd Engineer", "Able Seaman", "Oiler"]
+        )
+        p_vessel = st.text_input("Gemi Adı", value="BLUEFIN-1")
+        is_tanker = st.checkbox("Gemi Tanker mi?", value=True)
         
-    operator_name = st.text_input("Operatör Adı (İmza için)")
+    operator_name = st.text_input("Operatör Adı (İmza için)", value="Admin")
 
-# --- SEKME 2: EVRAK YÜKLEME VE YAPAY ZEKA ---
+# --- SEKME 2: EVRAK YÜKLEME ---
 with tab2:
     st.header("Evrak Yükleme")
     
-    uab_file = st.file_uploader("UAB Çıktısı (PDF)", type=["pdf"])
-    if uab_file and st.button("UAB Oku"):
-        st.info("UAB Okuma Modülü tetiklendi.")
-        
-    # Çoklu dosya yükleyici (PDF, PNG, JPG)
     uploaded_files = st.file_uploader(
-        "Yapay Zeka için Evraklar (Resim veya PDF)", 
+        "Evrakları Yükleyin (Resim veya PDF)", 
         type=["jpg", "png", "jpeg", "pdf"],
-        accept_multiple_files=True
+        accept_multiple_files=True,
+        key="main_uploader"
     )
     
-    if uploaded_files and st.button("Yapay Zeka ile Analiz Et"):
-        try:
-            ai_provider = st.secrets.get("AI_PROVIDER", "gemini")
-            api_key = st.secrets["GEMINI_API_KEY"]
-            model_name = st.secrets.get("AI_MODEL", "gemini-1.5-flash")
+    if uploaded_files and st.button("Evrakları Sisteme Aktar", type="primary"):
+        st.session_state.evidences = []
+        for up_file in uploaded_files:
+            file_bytes = up_file.getvalue()
+            mime_type = up_file.type or "application/pdf"
             
-            with st.spinner(f"Yapay Zeka {len(uploaded_files)} evrakı analiz ediyor..."):
-                for up_file in uploaded_files:
-                    file_bytes = up_file.getvalue()
-                    mime_type = up_file.type if up_file.type else (
-                        "application/pdf" if up_file.name.lower().endswith(".pdf") else "image/jpeg"
-                    )
-                    evidence = process_document(file_bytes, mime_type, ai_provider, api_key, model_name)
-                    st.session_state.evidences.append(evidence)
-                    
-            st.success(f"{len(uploaded_files)} adet evrak analiz edildi. 3. Kontrol sekmesine geçebilirsiniz.")
-        except Exception as e:
-            st.error(f"AI Analiz Hatası: {str(e)}")
+            ev = process_document(
+                data=file_bytes,
+                mime=mime_type,
+                provider_name="local",
+                api_key="",
+                model_name="",
+                filename=up_file.name
+            )
+            st.session_state.evidences.append(ev)
+            
+        st.success(f"{len(uploaded_files)} adet evrak anında yüklendi! '3. Kontrol' sekmesine geçebilirsiniz.")
 
-# --- SEKME 3: KONTROL VE ONAY ---
+# --- SEKME 3: KONTROL VE KURAL DENETİMİ ---
 with tab3:
     st.header("Kanıtlar ve Sonuçlar")
+    st.subheader("Yüklenen Evraklar (Operatör Onayı)")
     
-    st.subheader("Okunan Kanıtlar (Operatör Doğrulaması)")
     if not st.session_state.evidences:
-        st.info("Henüz evrak yüklenmedi.")
+        st.info("Henüz yüklenmiş evrak bulunmuyor. Lütfen '2. Evrak Yükle' sekmesinden dosyaları aktarın.")
     else:
         for i, ev in enumerate(st.session_state.evidences):
-            status = "✅ Doğrulandı" if ev.verified else "⚠️ Bekliyor"
-            date_str = ev.issue_date.strftime("%d.%m.%Y") if ev.issue_date else "Tarih Yok"
             col_a, col_b = st.columns([3, 1])
             with col_a:
-                st.write(f"**{ev.code}** | Tarih: {date_str} | Durum: {status}")
+                exp = ev.expiry_date.strftime("%d.%m.%Y") if ev.expiry_date else "Süresiz"
+                st.write(f"📄 **{ev.code}** | Belge: `{ev.document_no}` | Bitiş: {exp} | Durum: {'✅ Doğrulandı' if ev.verified else '⚠️ Bekliyor'}")
             with col_b:
                 if not ev.verified:
                     if st.button("Doğrula", key=f"verify_{i}"):
                         st.session_state.evidences[i].verified = True
                         st.rerun()
+                else:
+                    st.write("✅ Onaylı")
                 
     st.divider()
     
-    if st.button("Kuralları İşlet (Evaluate)", type="primary"):
-        # Depoda templates altında veya ana dizinde bulunma durumunu kontrol et
+    if st.button(f"Kuralları İşlet ({p_rank})", type="primary"):
         excel_path = "templates/35-101.xlsx" if os.path.exists("templates/35-101.xlsx") else "35-101.xlsx"
-        
         if not os.path.exists(excel_path):
-            st.error(f"Hata: 35-101.xlsx dosyası bulunamadı!")
+            st.error("Hata: 35-101.xlsx şablon dosyası bulunamadı!")
         else:
             try:
                 st.session_state.results = evaluate(
@@ -118,19 +117,18 @@ with tab3:
                     excel_path=excel_path, 
                     is_tanker=is_tanker
                 )
-                st.success("Değerlendirme başarıyla tamamlandı. 4. Çıktı Al sekmesine geçebilirsiniz.")
-                
+                st.success(f"{p_rank} için kurallar başarıyla işletildi. '4. Çıktı Al' sekmesinden raporları alabilirsiniz.")
                 for r in st.session_state.results:
                     if r.status == "OK":
                         st.write(f"🟢 **{r.code}**: {r.message}")
-                    elif r.status in ["REVIEW", "EXPIRED", "MISSING"]:
+                    else:
                         st.write(f"🔴 **{r.code}**: {r.message} ({r.status})")
             except Exception as e:
-                st.error(f"Değerlendirme sırasında hata oluştu: {str(e)}")
+                st.error(f"Kural değerlendirme hatası: {str(e)}")
 
-# --- SEKME 4: ÇIKTI AL ---
+# --- SEKME 4: RAPOR ÇIKTILARI ---
 with tab4:
-    st.header("Evrakları İndir")
+    st.header("Evrak Raporlarını İndir")
     personel_info = {
         "name": p_name, 
         "rank": p_rank, 
@@ -152,8 +150,8 @@ with tab4:
                 fill_excel(excel_template, excel_io, st.session_state.results, personel_info)
                 fill_word(word_template, word_io, st.session_state.results, personel_info, operator_name)
                 
-                st.success("Dosyalar hazır!")
-                st.download_button("35-101 İndir (Excel)", data=excel_io.getvalue(), file_name=f"35-101_{p_name}.xlsx")
-                st.download_button("35-102 İndir (Word)", data=word_io.getvalue(), file_name=f"35-102_{p_name}.docx")
+                st.success("Tüm raporlar hazır!")
+                st.download_button("📥 35-101 İndir (Excel)", data=excel_io.getvalue(), file_name=f"35-101_{p_name}.xlsx")
+                st.download_button("📥 35-102 İndir (Word)", data=word_io.getvalue(), file_name=f"35-102_{p_name}.docx")
             except Exception as e:
-                st.error(f"Dosya oluşturulurken hata: {str(e)}")
+                st.error(f"Dosya üretme hatası: {str(e)}")
