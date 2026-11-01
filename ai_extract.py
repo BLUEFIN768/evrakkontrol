@@ -1,6 +1,6 @@
 import re
 import io
-from typing import Optional, List
+from typing import Optional, List, Tuple, Dict
 from datetime import datetime
 import pdfplumber
 from crew_core import Evidence
@@ -29,8 +29,9 @@ def detect_code_from_name(filename: str) -> str:
     if "SICIL" in name or "SİCİL" in name or "CRIMINAL" in name: return "CRIMINAL_RECORD"
     return "UNKNOWN"
 
-def parse_uab_pdf_local(pdf_bytes: bytes) -> List[Evidence]:
+def parse_uab_pdf_local(pdf_bytes: bytes) -> Tuple[List[Evidence], Dict[str, str]]:
     evidences = []
+    extracted_info = {"tckn": "", "cuzdan": ""}
     text = ""
     try:
         with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
@@ -44,13 +45,13 @@ def parse_uab_pdf_local(pdf_bytes: bytes) -> List[Evidence]:
         tckn_match = re.search(r'Vatandaşlık Numarası.*?(\d{11})', text, re.IGNORECASE)
         cuzdan_match = re.search(r'Cüzdan Numarası.*?([A-Z0-9]+)', text, re.IGNORECASE)
         
-        tckn = tckn_match.group(1) if tckn_match else "Bulunamadı"
-        cuzdan = cuzdan_match.group(1) if cuzdan_match else "Bulunamadı"
+        extracted_info["tckn"] = tckn_match.group(1) if tckn_match else ""
+        extracted_info["cuzdan"] = cuzdan_match.group(1) if cuzdan_match else ""
         
         cuzdan_bitis = re.search(r'Bitiş Tarihi.*?(\d{2}\.\d{2}\.\d{4})', text)
         exp_date = parse_date(cuzdan_bitis.group(1)) if cuzdan_bitis else datetime(2028,12,31)
         
-        evidences.append(Evidence(code="SEAMAN_BOOK", document_no=cuzdan, issue_date=datetime(2024,1,1), expiry_date=exp_date, verified=True, raw_text=f"TCKN: {tckn}"))
+        evidences.append(Evidence(code="SEAMAN_BOOK", document_no=extracted_info["cuzdan"], issue_date=datetime(2024,1,1), expiry_date=exp_date, verified=True, raw_text=f"TCKN: {extracted_info['tckn']}"))
         
         if "UZAKYOL" in text or "KAPTAN" in text or "ZABİT" in text or "MÜHENDİS" in text:
              evidences.append(Evidence(code="COMPETENCY", document_no="UAB-COC", issue_date=datetime(2024,1,1), expiry_date=exp_date, verified=True))
@@ -69,15 +70,14 @@ def parse_uab_pdf_local(pdf_bytes: bytes) -> List[Evidence]:
             if any(kw in text for kw in keywords):
                 evidences.append(Evidence(code=code, document_no=f"UAB-{code}", issue_date=datetime(2024,1,1), expiry_date=exp_date, verified=True))
                 
-        return evidences
+        return evidences, extracted_info
     except Exception as e:
         print(f"UAB Parse Error: {e}")
-        return []
+        return [], extracted_info
 
 def process_document(data: bytes, mime: str, provider_name: str, api_key: str, model_name: str, filename: str = "") -> Evidence:
     code = detect_code_from_name(filename)
     valid_issue = datetime(2024, 1, 1)
     valid_expiry = datetime(2028, 12, 31)
     doc_no = re.sub(r'[^\w\s-]', '', filename.split(".")[0]).strip()
-    
     return Evidence(code=code, document_no=doc_no, issue_date=valid_issue, expiry_date=valid_expiry, verified=False, raw_text=f"Yerel Tanımlama: {filename}")
