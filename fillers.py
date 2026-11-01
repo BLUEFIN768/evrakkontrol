@@ -1,41 +1,60 @@
 import openpyxl
 from docx import Document
-import io
 from typing import List, Dict
 from crew_core import Result
 
-def safe_write_excel(ws, cell_coord, val):
+def safe_write_excel(ws, coord=None, row=None, col=None, val=""):
+    """
+    Hem 'C3' formatında hem de (row=7, col=2) formatında güvenli yazma yapar.
+    Birleştirilmiş hücre (MergedCell) hatalarını (read-only) engeller.
+    """
     try:
-        cell = ws[cell_coord]
+        if coord:
+            cell = ws[coord]
+        else:
+            cell = ws.cell(row=row, column=col)
+            
         if type(cell).__name__ == 'MergedCell':
             for r in ws.merged_cells.ranges:
                 if cell.coordinate in r:
+                    # Birleştirilmiş hücrenin asıl (sol üst) sahibi olan hücreye yazdırır
                     ws.cell(row=r.min_row, column=r.min_col).value = val
                     return
-        ws[cell_coord].value = val
-    except Exception:
-        pass
+        else:
+            cell.value = val
+    except Exception as e:
+        pass # Hata olursa programı çökertme, atla
 
 def fill_excel(template_path: str, output_stream, results: List[Result], personel_info: dict):
+    """35-101 Excel dosyasını şablonu bozmadan güvenle doldurur."""
     wb = openpyxl.load_workbook(template_path)
-    ws = wb.active
+    ws = wb["DOC_MATRIX"] if "DOC_MATRIX" in wb.sheetnames else wb.active
     
-    safe_write_excel(ws, "C3", personel_info.get("name", ""))
-    safe_write_excel(ws, "C4", personel_info.get("rank", ""))
-    safe_write_excel(ws, "G3", personel_info.get("vessel", ""))
-    safe_write_excel(ws, "G4", personel_info.get("date", ""))
+    # Şablonlardaki olası başlık hücrelerini doldur (Farklı 35-101 varyasyonları için)
+    safe_write_excel(ws, coord="C3", val=personel_info.get("name", ""))
+    safe_write_excel(ws, coord="C4", val=personel_info.get("rank", ""))
+    safe_write_excel(ws, coord="G3", val=personel_info.get("vessel", ""))
+    safe_write_excel(ws, coord="G4", val=personel_info.get("date", ""))
     
+    safe_write_excel(ws, coord="C6", val=personel_info.get("name", ""))
+    safe_write_excel(ws, coord="N6", val=personel_info.get("rank", ""))
+    safe_write_excel(ws, coord="C8", val=personel_info.get("date", ""))
+    safe_write_excel(ws, coord="N8", val=personel_info.get("vessel", ""))
+    
+    # Sonuçları listeye yaz (MergedCell hatasından korunarak)
     row_idx = 7
     for res in results:
-        ws.cell(row=row_idx, column=2).value = res.code
-        ws.cell(row=row_idx, column=5).value = res.status
-        ws.cell(row=row_idx, column=7).value = res.message
+        safe_write_excel(ws, row=row_idx, col=2, val=res.code)
+        safe_write_excel(ws, row=row_idx, col=5, val=res.status)
+        safe_write_excel(ws, row=row_idx, col=7, val=res.message)
         row_idx += 1
         
     wb.save(output_stream)
 
 def fill_word(template_path: str, output_stream, results: List[Result], personel_info: dict, operator_name: str):
+    """35-102 Word dosyasını doldurur."""
     doc = Document(template_path)
+    
     replacements = {
         "{{NAME}}": personel_info.get("name", ""),
         "{{RANK}}": personel_info.get("rank", ""),
@@ -44,11 +63,13 @@ def fill_word(template_path: str, output_stream, results: List[Result], personel
         "{{OPERATOR}}": operator_name
     }
     
+    # Paragraflardaki etiketleri değiştir
     for p in doc.paragraphs:
         for k, v in replacements.items():
             if k in p.text:
                 p.text = p.text.replace(k, v)
                 
+    # Tablolardaki etiketleri değiştir
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
