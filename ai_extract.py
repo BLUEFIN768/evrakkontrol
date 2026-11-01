@@ -58,12 +58,17 @@ def parse_uab_pdf_local(pdf_bytes: bytes) -> Tuple[List[Evidence], Dict[str, str
         if "GMDSS" in text or "TELSİZ" in text:
              evidences.append(Evidence(code="GMDSS", document_no="UAB-GMDSS", issue_date=datetime(2024,1,1), expiry_date=exp_date, verified=True))
              
+        # UAB TÜRKÇE -> SİSTEM KODU EŞLEŞTİRMESİ
         stcw_keywords = {
             "BASIC_SAFETY": ["CAN KURTARMA", "YANGIN", "İLK YARDIM", "İLKYARDIM", "KİŞİSEL EMNİYET"],
             "ADV_FIRE": ["İLERİ YANGIN"],
             "SURVIVAL_CRAFT": ["CANKURTARMA ARAÇLARI"],
             "ECDIS_GENERIC": ["ECDIS", "ELEKTRONİK HARİTA"],
-            "ERM / BRM": ["KÖPRÜÜSTÜ KAYNAK", "MAKİNE DAİRESİ KAYNAK", "BRM", "ERM"]
+            "ERM / BRM": ["KÖPRÜÜSTÜ KAYNAK", "MAKİNE DAİRESİ KAYNAK", "BRM", "ERM"],
+            "SECURITY_AWARENESS": ["FARKINDALIK"],
+            "DESIGNATED_SECURITY": ["BELİRLENMİŞ GÜVENLİK"],
+            "SSO": ["GEMİ GÜVENLİK ZABİTİ", "GÜVENLİK ZABİTİ"],
+            "RADAR": ["RADAR GÖZLEM", "ARPA"]
         }
         
         for code, keywords in stcw_keywords.items():
