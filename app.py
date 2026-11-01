@@ -7,38 +7,20 @@ from crew_core import Evidence, evaluate
 from ai_extract import process_document, parse_uab_pdf_local
 from fillers import fill_excel, fill_word
 
-# 1. SAYFA AYARLARI (Geniş Ekran)
+# 1. SAYFA AYARLARI
 st.set_page_config(page_title="Evrak Kontrol & Onay", layout="wide", page_icon="⚓")
 
-# 2. GÖRSELDEKİ ÖZEL CSS MAKYAJI (TEK SAYFA DASHBOARD)
+# 2. ÖZEL CSS MAKYAJI
 st.markdown("""
 <style>
-    /* Arka Plan ve Yazı Tipleri */
     .stApp { background-color: #f1f5f9; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-    
-    /* Ana Başlık */
     .main-title { font-size: 28px; font-weight: bold; color: #0f172a; margin-bottom: 20px; }
-    
-    /* Beyaz Kart Tasarımları (Personel, Matris, Listeler için) */
-    .card {
-        background-color: #ffffff; padding: 20px; border-radius: 12px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.1); border: 1px solid #e2e8f0; margin-bottom: 20px;
-    }
-    
-    /* Bölüm Alt Başlıkları */
+    .card { background-color: #ffffff; padding: 20px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border: 1px solid #e2e8f0; margin-bottom: 20px; }
     .sub-title { font-size: 20px; font-weight: 600; color: #1e293b; margin-bottom: 15px; border-bottom: 2px solid #f1f5f9; padding-bottom: 10px; }
-    
-    /* Evrak Listesi Satır Tasarımı */
-    .doc-row {
-        background-color: #f8fafc; padding: 15px; border-radius: 8px;
-        border: 1px solid #e2e8f0; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;
-    }
-    
-    /* Özel Buton Renkleri (Yeşil, Kırmızı, Mavi) */
+    .doc-row { background-color: #f8fafc; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
     .stButton > button { transition: all 0.3s ease; border-radius: 8px; font-weight: 600; width: 100%; }
-    
-    /* Input kutuları köşeleri */
     .stTextInput>div>div>input, .stSelectbox>div>div>select { border-radius: 8px; border: 1px solid #cbd5e1; }
+    .verify-msg { padding: 10px; border-radius: 8px; background-color: #dcfce7; color: #166534; border: 1px solid #bbf7d0; margin-top: 10px; font-weight: 500;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -62,8 +44,6 @@ if not check_password(): st.stop()
 if "evidences" not in st.session_state: st.session_state.evidences = []
 if "results" not in st.session_state: st.session_state.results = []
 if "p_name" not in st.session_state: st.session_state.p_name = ""
-if "p_tckn" not in st.session_state: st.session_state.p_tckn = ""
-if "p_cuzdan" not in st.session_state: st.session_state.p_cuzdan = ""
 if "p_rank" not in st.session_state: st.session_state.p_rank = "Master"
 if "p_vessel" not in st.session_state: st.session_state.p_vessel = ""
 if "is_tanker" not in st.session_state: st.session_state.is_tanker = False
@@ -74,60 +54,75 @@ if "auto_cuzdan" not in st.session_state: st.session_state.auto_cuzdan = ""
 # 3. ANA BAŞLIK
 st.markdown("<div class='main-title'>Evrak Kontrol & Onay (Auditing) 🔗</div>", unsafe_allow_html=True)
 
-# 4. ÜST BÖLÜM: PERSONEL KİMLİK KARTI
+# 4. ÜST BÖLÜM: PERSONEL KİMLİK & DOĞRULAMA ALANI
 st.markdown("<div class='card'>", unsafe_allow_html=True)
 st.markdown("<div class='sub-title'>Personel Kimlik & Atama</div>", unsafe_allow_html=True)
 
-col1, col2, col3 = st.columns(3)
+col1, col2 = st.columns([1, 1], gap="large")
+
 with col1:
     p_name = st.text_input("Ad Soyad", key="p_name_input", value=st.session_state.p_name)
     p_rank = st.selectbox("Rütbe / Görev", ["Master", "Chief Officer", "2nd Officer", "3rd Officer", "Chief Engineer", "2nd Engineer", "Able Seafarer Engine", "Able Seaman", "Oiler"], key="p_rank_input")
+
 with col2:
-    p_tckn = st.text_input("TCKN", key="p_tckn_input", value=st.session_state.auto_tckn)
-    p_cuzdan = st.text_input("Cüzdan No", key="p_cuzdan_input", value=st.session_state.auto_cuzdan)
-with col3:
     p_vessel = st.text_input("Gemi Adı", key="p_vessel_input")
-    operator_name = st.text_input("Operatör Adı", key="operator_name_input", value=st.session_state.operator_name)
-    is_tanker = st.checkbox("Gemi Tanker mi?", key="is_tanker_input")
+    col2a, col2b = st.columns(2)
+    with col2a:
+        is_tanker = st.checkbox("Gemi Tanker mi?", key="is_tanker_input")
+    with col2b:
+        operator_name = st.text_input("Operatör Adı", key="operator_name_input", value=st.session_state.operator_name)
+    
+st.markdown("---")
+
+col_verify1, col_verify2 = st.columns([1, 1], gap="large")
+
+with col_verify1:
+    st.markdown("**Gemi Adamı Evrak Doğrulama (UAB)**")
+    uab_file = st.file_uploader("UAB PDF Belgesini Sürükle-Bırak", type=["pdf"], key="uab_direct_upload")
+    if uab_file and st.button("UAB Oku ve Doğrula", type="primary", use_container_width=True):
+         with st.spinner("UAB Belgesi taranıyor..."):
+            uab_evs, ext_info = parse_uab_pdf_local(uab_file.getvalue())
+            if uab_evs:
+                st.session_state.evidences.extend(uab_evs)
+                if ext_info["tckn"]: st.session_state.auto_tckn = ext_info["tckn"]
+                if ext_info["cuzdan"]: st.session_state.auto_cuzdan = ext_info["cuzdan"]
+                st.rerun()
+
+with col_verify2:
+     st.markdown("**Gemi Adamı Kimlik Teyidi**")
+     if st.session_state.auto_tckn or st.session_state.auto_cuzdan:
+         st.markdown(f"""
+         <div class='verify-msg'>
+             ✅ <b>Doğrulama Başarılı!</b><br>
+             Sisteme aktarılan UAB belgesine göre gemi adamı kimlik bilgileri teyit edilmiştir:<br>
+             <b>TCKN:</b> {st.session_state.auto_tckn} | <b>Cüzdan No:</b> {st.session_state.auto_cuzdan}
+         </div>
+         """, unsafe_allow_html=True)
+     else:
+         st.info("Kimlik teyidi için sol taraftan UAB belgesi yükleyip doğrulayın.")
+
 st.markdown("</div>", unsafe_allow_html=True)
 
 
-# 5. ALT BÖLÜM: İKİ SÜTUNLU YAPI (SOL: EVRAKLAR, SAĞ: MATRİS)
+# 5. ALT BÖLÜM: İKİ SÜTUNLU YAPI (SOL: HARİCİ EVRAKLAR, SAĞ: MATRİS)
 col_left, col_right = st.columns([6, 4], gap="large")
 
-# SOL PANEL: YÜKLEME VE LİSTE
+# SOL PANEL: HARİCİ YÜKLEME VE LİSTE
 with col_left:
     st.markdown("<div class='card'>", unsafe_allow_html=True)
     st.markdown("<div class='sub-title'>Evrak Doğrulama Listesi</div>", unsafe_allow_html=True)
     
-    # Tek Yükleme Kutusu (Hem UAB hem Harici)
-    uploaded_files = st.file_uploader("UAB PDF veya Harici Evrak Sürükle-Bırak", accept_multiple_files=True)
-    if uploaded_files and st.button("Yüklenen Evrakları İşle", type="primary", use_container_width=True):
-        with st.spinner("Evraklar sistem tarafından taranıyor..."):
-            for f in uploaded_files:
-                file_bytes = f.getvalue()
-                is_uab_processed = False
-                
-                # Eğer PDF ise önce UAB motoruna sokmayı dene
-                if f.name.lower().endswith(".pdf"):
-                    uab_evs, ext_info = parse_uab_pdf_local(file_bytes)
-                    if uab_evs: # UAB başarıyla okundu demektir
-                        st.session_state.evidences.extend(uab_evs)
-                        if ext_info["tckn"]: st.session_state.auto_tckn = ext_info["tckn"]
-                        if ext_info["cuzdan"]: st.session_state.auto_cuzdan = ext_info["cuzdan"]
-                        is_uab_processed = True
-                        
-                # Eğer UAB değilse veya resimse, Harici Evrak olarak ekle
-                if not is_uab_processed:
-                    ev = process_document(file_bytes, f.type or "application/pdf", "local", "", "", f.name)
-                    if not any(e.code == ev.code and e.verified for e in st.session_state.evidences):
-                        st.session_state.evidences.append(ev)
-            
-            st.rerun()
+    st.markdown("**Harici Evrak Yükleme** (Pasaport, Sağlık vb.)")
+    ext_files = st.file_uploader("Harici Evrak Sürükle-Bırak", accept_multiple_files=True, key="ext_upload")
+    if ext_files and st.button("Harici Evrakları İşle", type="secondary", use_container_width=True):
+        for f in ext_files:
+            ev = process_document(f.getvalue(), f.type or "application/pdf", "local", "", "", f.name)
+            if not any(e.code == ev.code and e.verified for e in st.session_state.evidences):
+                st.session_state.evidences.append(ev)
+        st.rerun()
 
     st.markdown("---")
     
-    # Yüklenen Evrakların Listelenmesi
     if not st.session_state.evidences:
         st.info("Henüz sisteme evrak yüklenmedi.")
     else:
@@ -156,7 +151,7 @@ with col_left:
             st.markdown("</div>", unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
-# SAĞ PANEL: MATRİS VE İNDİRME (OTOMATİK DEĞERLENDİRME)
+# SAĞ PANEL: MATRİS VE İNDİRME
 with col_right:
     st.markdown("<div class='card'>", unsafe_allow_html=True)
     st.markdown(f"<div class='sub-title'>35-101 Matris Uygunluğu ({p_rank})</div>", unsafe_allow_html=True)
@@ -164,7 +159,6 @@ with col_right:
     excel_template_path = "templates/35-101.xlsx" if os.path.exists("templates/35-101.xlsx") else "35-101.xlsx"
     
     if os.path.exists(excel_template_path):
-        # Arka planda anında işletilir (Butona gerek kalmadan)
         st.session_state.results = evaluate(
             evidences=st.session_state.evidences, 
             rank=p_rank, 
@@ -172,7 +166,6 @@ with col_right:
             is_tanker=is_tanker
         )
         
-        # Sonuçların Gösterilmesi
         if st.session_state.results:
             for r in st.session_state.results:
                 icon = "✅" if r.status == "OK" else "❌"
@@ -186,7 +179,6 @@ with col_right:
                 
             st.markdown("<br>", unsafe_allow_html=True)
             
-            # Word/Excel ZIP İndirme Butonu
             personel_info = {
                 "name": p_name or "Personel", "rank": p_rank, 
                 "vessel": p_vessel or "Belirtilmedi", "date": datetime.now().strftime("%d.%m.%Y")
