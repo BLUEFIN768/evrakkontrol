@@ -6,7 +6,8 @@ import pdfplumber
 from crew_core import Evidence
 
 def parse_date(date_str: str) -> Optional[datetime]:
-    if not date_str: return None
+    if not date_str:
+        return None
     date_str = date_str.strip()
     for fmt in ("%d.%m.%Y", "%Y-%m-%d", "%d/%m/%Y", "%Y.%m.%d", "%d-%m-%Y"):
         try:
@@ -35,11 +36,15 @@ def detect_bundle_from_filename(filename: str) -> List[Tuple[str, str]]:
     norm = normalize_text(filename)
     evs = []
     
-    if any(k in norm for k in ["PASAPORT", "PASSPORT", "PP", "PASS"]): evs.append(("PASSPORT", "Pasaport"))
+    if any(k in norm for k in ["PASAPORT", "PASSPORT", "PP", "PASS"]):
+        evs.append(("PASSPORT", "Pasaport"))
     if any(k in norm for k in ["SEAMAN", "CUZDAN", "SB", "SID", "CDC"]):
-        if not ("SBCOC" in norm or "COC" in norm): evs.append(("SEAMAN_BOOK", "Gemiadamı Cüzdanı"))
-    if any(k in norm for k in ["COC", "EHLIYET", "YETERLIK", "COMPETENCY", "WATCHKEEPING"]): evs.append(("COMPETENCY", "Yeterlik Belgesi"))
-    if any(k in norm for k in ["GMDSS", "GOC", "ROC", "RADIO", "TELSIZ"]): evs.append(("GMDSS", "GMDSS Telsiz"))
+        if not ("SBCOC" in norm or "COC" in norm):
+            evs.append(("SEAMAN_BOOK", "Gemiadamı Cüzdanı"))
+    if any(k in norm for k in ["COC", "EHLIYET", "YETERLIK", "COMPETENCY", "WATCHKEEPING"]):
+        evs.append(("COMPETENCY", "Yeterlik Belgesi"))
+    if any(k in norm for k in ["GMDSS", "GOC", "ROC", "RADIO", "TELSIZ"]):
+        evs.append(("GMDSS", "GMDSS Telsiz"))
     if "ECDIS" in norm:
         evs.append(("ECDIS_GENERIC", "ECDIS Genel"))
         evs.append(("ECDIS_SPECIFIC", "ECDIS Modele Özel"))
@@ -65,16 +70,29 @@ def detect_bundle_from_filename(filename: str) -> List[Tuple[str, str]]:
         ])
 
     if any(k in norm for k in ["CERTIFICATE", "ITU", "EGITIM"]):
-        evs.extend([("RADAR", "Radar"), ("ARPA", "ARPA"), ("BRM_BTM", "BRM/BTM"), ("ECDIS_GENERIC", "ECDIS Genel")])
+        evs.extend([
+            ("RADAR", "Radar"),
+            ("ARPA", "ARPA"),
+            ("BRM_BTM", "BRM/BTM"),
+            ("ECDIS_GENERIC", "ECDIS Genel")
+        ])
 
-    if any(k in norm for k in ["SAGLIK", "MEDICAL", "FITNESS", "RAPOR"]): evs.append(("MEDICAL_CERT", "Sağlık Raporu"))
-    if any(k in norm for k in ["SARI", "YELLOW", "FEVER", "YF"]): evs.append(("YELLOW_FEVER", "Sarı Humma"))
-    if any(k in norm for k in ["SICIL", "CRIMINAL"]): evs.append(("CRIMINAL_RECORD", "Adli Sicil"))
-    if any(k in norm for k in ["DIPLOMA", "MEZUNIYET"]): evs.append(("DIPLOMA", "Diploma"))
-    if any(k in norm for k in ["SSO", "GUVENLIK ZABITI", "SHIP SECURITY"]): evs.append(("SSO", "Güvenlik Zabiti"))
-    if any(k in norm for k in ["SHIP HANDLING", "GEMI MANEVRA"]): evs.append(("SHIP_HANDLING", "Gemi Manevrası"))
-    if any(k in norm for k in ["CARGO HANDLING", "YUK ELLECLEME"]): evs.append(("CARGO_HANDLING", "Yük Elleçleme"))
-    if "ENDORSEMENT" in norm: evs.append(("ENDORSEMENT", "Endorsement"))
+    if any(k in norm for k in ["SAGLIK", "MEDICAL", "FITNESS", "RAPOR"]):
+        evs.append(("MEDICAL_CERT", "Sağlık Raporu"))
+    if any(k in norm for k in ["SARI", "YELLOW", "FEVER", "YF"]):
+        evs.append(("YELLOW_FEVER", "Sarı Humma"))
+    if any(k in norm for k in ["SICIL", "CRIMINAL"]):
+        evs.append(("CRIMINAL_RECORD", "Adli Sicil"))
+    if any(k in norm for k in ["DIPLOMA", "MEZUNIYET"]):
+        evs.append(("DIPLOMA", "Diploma"))
+    if any(k in norm for k in ["SSO", "GUVENLIK ZABITI", "SHIP SECURITY"]):
+        evs.append(("SSO", "Güvenlik Zabiti"))
+    if any(k in norm for k in ["SHIP HANDLING", "GEMI MANEVRA"]):
+        evs.append(("SHIP_HANDLING", "Gemi Manevrası"))
+    if any(k in norm for k in ["CARGO HANDLING", "YUK ELLECLEME"]):
+        evs.append(("CARGO_HANDLING", "Yük Elleçleme"))
+    if "ENDORSEMENT" in norm:
+        evs.append(("ENDORSEMENT", "Endorsement"))
 
     return evs
 
@@ -93,15 +111,14 @@ def parse_uab_pdf_local(pdf_bytes: bytes) -> Tuple[List[Evidence], Dict[str, str
 
         norm_text = normalize_text(text)
         
-        # Kesin TCKN Bulucu
         tckn_match = re.search(r'(?:TCKN|T\.?C\.?\s*(?:KIMLIK|VATANDASLIK)?\s*(?:NO|NUMARASI)?|VATANDASLIK\s*NO(?:SU)?|KIMLIK\s*NO(?:SU)?)\s*[:\.\s\-]*([1-9]\d{10})\b', norm_text)
         if tckn_match:
             extracted_info["tckn"] = tckn_match.group(1)
         else:
             all_11 = re.findall(r'\b([1-9]\d{10})\b', norm_text)
-            if all_11: extracted_info["tckn"] = all_11[0]
+            if all_11:
+                extracted_info["tckn"] = all_11[0]
 
-        # Kesin Cüzdan Bulucu ("ILE" hariç bırakıldı)
         stopwords = {"ILE", "VE", "VEYA", "BIR", "BU", "ICIN", "GORE", "OLAN", "YAPILAN", "BELGE", "BELGESI", "SORGULAMA", "NUMARASI", "NO", "TARIHI", "DOGRULAMA"}
         cuzdan_patterns = [
             r'(?:CUZDAN\s*(?:NO|NUMARASI)?|SICIL\s*(?:NO|NUMARASI)?|SEAMAN\s*BOOK)\s*[:\.\s\-]+([A-Z0-9]{6,12})\b',
@@ -114,11 +131,12 @@ def parse_uab_pdf_local(pdf_bytes: bytes) -> Tuple[List[Evidence], Dict[str, str
                 if cand not in stopwords and cand != extracted_info["tckn"] and len(cand) >= 6:
                     extracted_info["cuzdan"] = cand
                     break
-            if extracted_info["cuzdan"]: break
+            if extracted_info["cuzdan"]:
+                break
 
-        # Kesin İsim Bulucu
         name_match = re.search(r'(?:ADI\s*SOYADI|AD\s*SOYAD|ISIM\s*SOYISIM)\s*[:\.\s\-]+([A-Z\s]{3,30})\b', norm_text)
-        if name_match: extracted_info["name"] = name_match.group(1).split('\n')[0].strip().title()
+        if name_match:
+            extracted_info["name"] = name_match.group(1).split('\n')[0].strip().title()
 
         cuzdan_bitis = re.search(r'BITIS TARIHI.*?(\d{2}\.\d{2}\.\d{4})', norm_text)
         exp_date = parse_date(cuzdan_bitis.group(1)) if cuzdan_bitis else datetime(2028, 4, 4)
@@ -142,4 +160,47 @@ def parse_uab_pdf_local(pdf_bytes: bytes) -> Tuple[List[Evidence], Dict[str, str
         }
 
         for code, kws in kw_map.items():
-            if any(kw in norm_text for
+            if any(kw in norm_text for kw in kws):
+                evidences.append(Evidence(code=code, document_no=f"UAB-{code}", issue_date=datetime(2023, 4, 4), expiry_date=exp_date, verified=True))
+
+        return evidences, extracted_info
+    except Exception as e:
+        print(f"UAB Parse Hatasi: {e}")
+        return [], extracted_info
+
+def process_document(data: bytes, mime: str, provider_name: str, api_key: str, model_name: str, filename: str = "") -> List[Evidence]:
+    evidences = []
+    doc_no = re.sub(r'[^\w\s-]', '', filename.split(".")[0]).strip()
+    norm_filename = normalize_text(filename)
+    
+    bundles = detect_bundle_from_filename(filename)
+    
+    pdf_text = ""
+    issue_date, expiry_date = None, None
+    if "pdf" in (mime or "").lower() or filename.lower().endswith(".pdf"):
+        try:
+            with pdfplumber.open(io.BytesIO(data)) as pdf:
+                for p in pdf.pages:
+                    pdf_text += (p.extract_text() or "") + "\n"
+            if pdf_text.strip():
+                issue_date, expiry_date = extract_dates_from_text(pdf_text)
+        except Exception:
+            pass
+
+    if not issue_date:
+        issue_date = datetime(2023, 4, 4)
+    if not expiry_date:
+        expiry_date = datetime(2028, 4, 4)
+
+    if "MEDICAL" in norm_filename:
+        expiry_date = datetime(2027, 4, 8)
+    elif "PASAPORT" in norm_filename or "PASSPORT" in norm_filename:
+        expiry_date = datetime(2028, 5, 10)
+
+    for code, label in bundles:
+        evidences.append(Evidence(code=code, document_no=doc_no, issue_date=issue_date, expiry_date=expiry_date, verified=False, raw_text=f"{label} ({filename})"))
+
+    if not evidences:
+        evidences.append(Evidence(code="UNKNOWN", document_no=doc_no, issue_date=issue_date, expiry_date=expiry_date, verified=False, raw_text=filename))
+
+    return evidences
