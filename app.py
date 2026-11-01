@@ -175,13 +175,27 @@ with tab4:
             excel_template = "templates/35-101.xlsx" if os.path.exists("templates/35-101.xlsx") else "35-101.xlsx"
             word_template = "templates/35-102.docx" if os.path.exists("templates/35-102.docx") else "35-102.docx"
             try:
-                excel_io, word_io = io.BytesIO()
-                fill_excel(excel_template, excel_io, st.session_state.results, personel_info)
-                fill_word(word_template, word_io, st.session_state.results, personel_info, operator_name or "Yetkili")
+                # BytesIO (RAM) yerine geçici (temp) disk dosyaları kullanıyoruz
+                import tempfile
+                
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp_excel:
+                    fill_excel(excel_template, tmp_excel.name, st.session_state.results, personel_info)
+                    excel_path = tmp_excel.name
+                    
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp_word:
+                    fill_word(word_template, tmp_word.name, st.session_state.results, personel_info, operator_name or "Yetkili")
+                    word_path = tmp_word.name
                 
                 st.success("🎉 Raporlar başarıyla üretildi!")
                 col_dl1, col_dl2 = st.columns(2)
-                with col_dl1: st.download_button("📥 35-101 İndir (Excel)", data=excel_io.getvalue(), file_name=f"35-101_{personel_info['name']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
-                with col_dl2: st.download_button("📥 35-102 İndir (Word)", data=word_io.getvalue(), file_name=f"35-102_{personel_info['name']}.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", use_container_width=True)
+                
+                with col_dl1:
+                    with open(excel_path, "rb") as f:
+                        st.download_button("📥 35-101 İndir (Excel)", data=f, file_name=f"35-101_{personel_info['name']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+                with col_dl2:
+                    with open(word_path, "rb") as f:
+                        st.download_button("📥 35-102 İndir (Word)", data=f, file_name=f"35-102_{personel_info['name']}.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", use_container_width=True)
+                        
             except Exception as e:
+                st.error(f"Dosya oluşturulurken hata: {str(e)}")
                 st.error(f"Dosya oluşturulurken hata: {str(e)}")
