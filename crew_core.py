@@ -44,15 +44,32 @@ def load_rules_from_excel(filepath: str, rank: str, is_tanker: bool = False) -> 
                     doc_clean = str(doc_name).strip().upper()
                     matched_code = None
                     
+                    # GENİŞLETİLMİŞ EXCEL EŞLEŞTİRME SÖZLÜĞÜ
                     if "PASSPORT" in doc_clean or "PASAPORT" in doc_clean: matched_code = "PASSPORT"
                     elif "SEAMAN" in doc_clean or "CÜZDAN" in doc_clean: matched_code = "SEAMAN_BOOK"
                     elif "MEDICAL" in doc_clean or "SAĞLIK" in doc_clean: matched_code = "MEDICAL_CERT"
                     elif "YELLOW" in doc_clean or "FEVER" in doc_clean: matched_code = "YELLOW_FEVER"
-                    elif "STCW" in doc_clean or "BASIC" in doc_clean or "SAFETY" in doc_clean: matched_code = "BASIC_SAFETY"
                     elif "GMDSS" in doc_clean or "RADIO" in doc_clean: matched_code = "GMDSS"
                     elif "COMPETENCY" in doc_clean or "YETERLİK" in doc_clean or "EHLİYET" in doc_clean: matched_code = "COMPETENCY"
                     elif "CRIMINAL" in doc_clean or "SİCİL" in doc_clean: matched_code = "CRIMINAL_RECORD"
                     elif "ECDIS" in doc_clean: matched_code = "ECDIS_GENERIC"
+                    
+                    # STCW Güvenlik & Farkındalık
+                    elif "SECURITY" in doc_clean and "AWARENESS" in doc_clean: matched_code = "SECURITY_AWARENESS"
+                    elif "DESIGNATED" in doc_clean and "SECURITY" in doc_clean: matched_code = "DESIGNATED_SECURITY"
+                    elif "SHIP" in doc_clean and "SECURITY" in doc_clean: matched_code = "SSO"
+                    elif "FAMILIRIZATION" in doc_clean: matched_code = "SECURITY_AWARENESS"
+                    
+                    # İleri STCW & Kurtarma
+                    elif "ADVANCED" in doc_clean and "FIRE" in doc_clean: matched_code = "ADV_FIRE"
+                    elif "SURVIVAL" in doc_clean and "CRAFT" in doc_clean: matched_code = "SURVIVAL_CRAFT"
+                    elif "RADAR" in doc_clean or "ARPA" in doc_clean: matched_code = "RADAR"
+                    
+                    # Temel STCW Alt Sertifikaları (Hepsi BASIC_SAFETY'e bağlanır)
+                    elif "BASIC" in doc_clean and "SAFETY" in doc_clean: matched_code = "BASIC_SAFETY"
+                    elif "PERSONAL" in doc_clean and "SURVIVAL" in doc_clean: matched_code = "BASIC_SAFETY"
+                    elif "ELEMENTARY" in doc_clean and "FIRST" in doc_clean: matched_code = "BASIC_SAFETY"
+                    elif "FIRE" in doc_clean and "PREVENTION" in doc_clean: matched_code = "BASIC_SAFETY"
                     
                     if not matched_code:
                         matched_code = doc_clean.replace(" ", "_")
