@@ -48,12 +48,12 @@ def check_password():
 if not check_password():
     st.stop()
 
+# Güvenli Oturum (Session) Değişkenleri
 if "evidences" not in st.session_state: st.session_state.evidences = []
 if "results" not in st.session_state: st.session_state.results = []
 if "uab_loaded" not in st.session_state: st.session_state.uab_loaded = False
-if "p_name" not in st.session_state: st.session_state.p_name = ""
-if "p_tckn" not in st.session_state: st.session_state.p_tckn = ""
-if "p_cuzdan" not in st.session_state: st.session_state.p_cuzdan = ""
+if "auto_tckn" not in st.session_state: st.session_state.auto_tckn = ""
+if "auto_cuzdan" not in st.session_state: st.session_state.auto_cuzdan = ""
 
 col_title, col_user = st.columns([4, 1])
 with col_title:
@@ -68,14 +68,15 @@ with tab1:
     st.subheader("Personel Kimlik & Atama Bilgileri")
     col1, col2 = st.columns(2)
     with col1:
-        p_name = st.text_input("Ad Soyad", key="p_name")
-        p_tckn = st.text_input("TCKN", key="p_tckn")
-        p_cuzdan = st.text_input("Cüzdan No", key="p_cuzdan")
+        p_name = st.text_input("Ad Soyad")
+        # Değerler zorla yazdırılmaz, "value=" ile bellekten çağrılır. Bu hatayı engeller.
+        p_tckn = st.text_input("TCKN", value=st.session_state.auto_tckn)
+        p_cuzdan = st.text_input("Cüzdan No", value=st.session_state.auto_cuzdan)
     with col2:
-        p_rank = st.selectbox("Rütbe / Görev", ["Master", "Chief Officer", "2nd Officer", "3rd Officer", "Chief Engineer", "2nd Engineer", "Able Seafarer Engine", "Able Seaman", "Oiler"], key="p_rank")
-        p_vessel = st.text_input("Gemi Adı", key="p_vessel")
-        is_tanker = st.checkbox("Gemi Tanker mi?", key="is_tanker")
-        operator_name = st.text_input("Operatör Adı (İmza için)", key="operator_name")
+        p_rank = st.selectbox("Rütbe / Görev", ["Master", "Chief Officer", "2nd Officer", "3rd Officer", "Chief Engineer", "2nd Engineer", "Able Seafarer Engine", "Able Seaman", "Oiler"])
+        p_vessel = st.text_input("Gemi Adı")
+        is_tanker = st.checkbox("Gemi Tanker mi?")
+        operator_name = st.text_input("Operatör Adı (İmza için)")
 
 with tab2:
     st.subheader("UAB Doğrulama & Harici Evraklar")
@@ -89,12 +90,14 @@ with tab2:
                 if uab_evidences:
                     st.session_state.evidences.extend(uab_evidences)
                     st.session_state.uab_loaded = True
+                    # Okunan verileri bellek havuzuna atarız
                     if extracted_info["tckn"]:
-                        st.session_state.p_tckn = extracted_info["tckn"]
+                        st.session_state.auto_tckn = extracted_info["tckn"]
                     if extracted_info["cuzdan"]:
-                        st.session_state.p_cuzdan = extracted_info["cuzdan"]
+                        st.session_state.auto_cuzdan = extracted_info["cuzdan"]
+                    
                     st.success("✅ Başarılı! TCKN ve Cüzdan numaraları Personel sekmesine kopyalandı.")
-                    st.rerun()
+                    st.rerun() # Sayfayı yeniler ve 1. Sekmedeki kutular yeni verilerle dolar
                 else:
                     st.error("UAB Belgesi okunamadı.")
                     
@@ -142,13 +145,13 @@ with tab3:
                     st.button("Onaylandı", key=f"verified_{i}", disabled=True, use_container_width=True)
             st.markdown("---")
             
-    if st.button(f"🚀 Kuralları İşlet ve Değerlendir ({st.session_state.p_rank})", type="primary", use_container_width=True):
+    if st.button(f"🚀 Kuralları İşlet ve Değerlendir ({p_rank})", type="primary", use_container_width=True):
         excel_template_path = "templates/35-101.xlsx" if os.path.exists("templates/35-101.xlsx") else "35-101.xlsx"
         if not os.path.exists(excel_template_path):
             st.error("Hata: Kural kaynağı bulunamadı!")
         else:
             try:
-                st.session_state.results = evaluate(evidences=st.session_state.evidences, rank=st.session_state.p_rank, excel_path=excel_template_path, is_tanker=st.session_state.is_tanker)
+                st.session_state.results = evaluate(evidences=st.session_state.evidences, rank=p_rank, excel_path=excel_template_path, is_tanker=is_tanker)
                 st.success("Kurallar başarıyla işletildi. '4. Çıktı Al' sekmesine geçebilirsiniz.")
                 for r in st.session_state.results:
                     if r.status == "OK": st.success(f"**{r.code}**: {r.message}")
@@ -159,9 +162,9 @@ with tab3:
 with tab4:
     st.subheader("Evrak Raporlarını İndir")
     personel_info = {
-        "name": st.session_state.p_name or "Personel", 
-        "rank": st.session_state.p_rank, 
-        "vessel": st.session_state.p_vessel or "Belirtilmedi", 
+        "name": p_name or "Personel", 
+        "rank": p_rank, 
+        "vessel": p_vessel or "Belirtilmedi", 
         "date": datetime.now().strftime("%d.%m.%Y")
     }
     
@@ -172,9 +175,9 @@ with tab4:
             excel_template = "templates/35-101.xlsx" if os.path.exists("templates/35-101.xlsx") else "35-101.xlsx"
             word_template = "templates/35-102.docx" if os.path.exists("templates/35-102.docx") else "35-102.docx"
             try:
-                excel_io, word_io = io.BytesIO(), io.BytesIO()
+                excel_io, word_io = io.BytesIO()
                 fill_excel(excel_template, excel_io, st.session_state.results, personel_info)
-                fill_word(word_template, word_io, st.session_state.results, personel_info, st.session_state.operator_name or "Yetkili")
+                fill_word(word_template, word_io, st.session_state.results, personel_info, operator_name or "Yetkili")
                 
                 st.success("🎉 Raporlar başarıyla üretildi!")
                 col_dl1, col_dl2 = st.columns(2)
