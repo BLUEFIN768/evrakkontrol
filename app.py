@@ -47,7 +47,17 @@ if "auto_tckn" not in st.session_state: st.session_state.auto_tckn = ""
 if "auto_cuzdan" not in st.session_state: st.session_state.auto_cuzdan = ""
 if "uab_verified" not in st.session_state: st.session_state.uab_verified = False
 
-st.markdown("<div class='main-title'>⚓ Evrak Kontrol & Onay (Auditing)</div>", unsafe_allow_html=True)
+col_top1, col_top2 = st.columns([8, 2])
+with col_top1:
+    st.markdown("<div class='main-title'>⚓ Evrak Kontrol & Onay (Auditing)</div>", unsafe_allow_html=True)
+with col_top2:
+    if st.button("🔄 Denetimi Sıfırla (Temizle)", type="secondary"):
+        st.session_state.evidences = []
+        st.session_state.results = []
+        st.session_state.uab_verified = False
+        st.session_state.auto_tckn = ""
+        st.session_state.auto_cuzdan = ""
+        st.rerun()
 
 with st.container(border=True):
     st.markdown("<div class='section-title'>Personel Kimlik & Atama</div>", unsafe_allow_html=True)
@@ -73,7 +83,8 @@ with st.container(border=True):
             with st.spinner("UAB Belgesi çözümleniyor..."):
                 uab_evs, ext_info = parse_uab_pdf_local(uab_file.getvalue())
                 if uab_evs or ext_info["tckn"] or ext_info["cuzdan"]:
-                    st.session_state.evidences.extend(uab_evs)
+                    # Eski UAB kayıtlarını temizle ve yenilerini yükle (Oturum kilidini çözer)
+                    st.session_state.evidences = uab_evs
                     if ext_info["tckn"]: st.session_state.auto_tckn = ext_info["tckn"]
                     if ext_info["cuzdan"]: st.session_state.auto_cuzdan = ext_info["cuzdan"]
                     if ext_info.get("name") and not st.session_state.p_name: st.session_state.p_name = ext_info["name"]
@@ -104,7 +115,6 @@ with st.container(border=True):
 
 st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
 
-# KURAL: UAB DOĞRULANMADAN ALT KISIM GÖRÜNMEZ
 if st.session_state.uab_verified:
     col_left, col_right = st.columns([6, 4], gap="medium")
 
@@ -114,13 +124,16 @@ if st.session_state.uab_verified:
             st.markdown("**Harici Evrak Yükleme** (Pasaport, Sağlık, STCW vb.)")
             ext_files = st.file_uploader("Harici Evrakları Seç veya Sürükle", accept_multiple_files=True, key="ext_uploader")
             
-            if ext_files and st.button("Harici Evrakları İşle", type="secondary", use_container_width=True):
+            # Otomatik İşleme: Dosyalar bırakıldığı anda işlenir
+            if ext_files:
                 for f in ext_files:
                     ev_list = process_document(f.getvalue(), f.type or "application/pdf", "local", "", "", f.name)
                     for single_ev in ev_list:
-                        if not any(e.code == single_ev.code and e.verified for e in st.session_state.evidences):
+                        existing_idx = next((idx for idx, e in enumerate(st.session_state.evidences) if e.code == single_ev.code), None)
+                        if existing_idx is not None:
+                            st.session_state.evidences[existing_idx] = single_ev
+                        else:
                             st.session_state.evidences.append(single_ev)
-                st.rerun()
 
             st.markdown("---")
             if not st.session_state.evidences:
@@ -132,8 +145,9 @@ if st.session_state.uab_verified:
                         c_icon, c_info, c_btn1, c_btn2 = st.columns([1, 6, 2, 2])
                         with c_icon: st.markdown(f"### {'✅' if ev.verified else '📄'}")
                         with c_info:
-                            exp = ev.expiry_date.strftime("%d.%m.%Y") if ev.expiry_date else "Süresiz"
-                            st.markdown(f"**{ev.code}**<br><small>No: {ev.document_no} | Bitiş: {exp}</small>", unsafe_allow_html=True)
+                            iss_str = ev.issue_date.strftime("%d.%m.%Y") if ev.issue_date else "Belirtilmedi"
+                            exp_str = ev.expiry_date.strftime("%d.%m.%Y") if ev.expiry_date else "Süresiz"
+                            st.markdown(f"**{ev.code}**<br><small>No: {ev.document_no} | Alınış: {iss_str} | Bitiş: {exp_str}</small>", unsafe_allow_html=True)
                         with c_btn1:
                             if not ev.verified:
                                 if st.button("Onayla", key=f"ok_{i}"):
@@ -156,9 +170,29 @@ if st.session_state.uab_verified:
                 st.session_state.results = evaluate(st.session_state.evidences, p_rank, excel_template_path, is_tanker)
                 if st.session_state.results:
                     for r in st.session_state.results:
-                        icon = "✅" if r.status == "OK" else "❌"
-                        color = "#16a34a" if r.status == "OK" else "#dc2626"
-                        st.markdown(f"<div style='display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #f1f5f9; padding:6px 0;'><span style='font-size:13px; font-weight:500; color:#334155;'>{r.code}</span><span style='color:{color}; font-weight:bold; font-size:16px;'>{icon}</span></div>", unsafe_allow_html=True)
+                        if r.status == "OK":
+                            icon = "✅"
+                            color = "#16a34a"
+                            hint = "Geçerli"
+                        elif r.status == "REVIEW":
+                            icon = "🟡"
+                            color = "#eab308"
+                            hint = "Onay Bekliyor"
+                        elif r.status == "EXPIRED":
+                            icon = "⏰"
+                            color = "#dc2626"
+                            hint = "Süresi Dolmuş"
+                        else:
+                            icon = "❌"
+                            color = "#dc2626"
+                            hint = "Eksik"
+
+                        st.markdown(f"""
+                        <div style='display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #f1f5f9; padding:6px 0;'>
+                            <span style='font-size:13px; font-weight:500; color:#334155;'>{r.code}</span>
+                            <span><small style='color:{color}; font-size:11px; margin-right:6px;'>{hint}</small><span style='color:{color}; font-weight:bold; font-size:15px;'>{icon}</span></span>
+                        </div>
+                        """, unsafe_allow_html=True)
                     
                     personel_info = {"name": p_name or "Personel", "rank": p_rank, "vessel": p_vessel or "Belirtilmedi", "date": datetime.now().strftime("%d.%m.%Y")}
                     try:
