@@ -1,6 +1,6 @@
 import openpyxl
 from dataclasses import dataclass
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Tuple
 from datetime import datetime
 
 @dataclass
@@ -19,14 +19,13 @@ class Result:
     message: str
     evidence_used: Optional[Evidence] = None
 
-# 35-101 Standart Satır - Kod Eşleşme Haritası
 MATRIX_ROW_TO_CODE = {
     14: "COMPETENCY",
-    16: "GMDSS",
-    18: "SEAMAN_BOOK",
-    20: "PASSPORT",
-    22: "MEDICAL_CERT",
-    24: "YELLOW_FEVER",
+    16: "SEAMAN_BOOK",
+    18: "PASSPORT",
+    20: "MEDICAL_CERT",
+    22: "YELLOW_FEVER",
+    24: "GMDSS",
     26: "FIRE_PREVENTION_AND_FIRE_FIGHTING",
     28: "PERSONAL_SURVIVAL_TECHNIQUES",
     30: "ELEMENTARY_FIRST_AID",
@@ -58,21 +57,49 @@ MATRIX_ROW_TO_CODE = {
     82: "ENDORSEMENT"
 }
 
+RANK_TO_COLUMN_MAP = {
+    "MASTER": 6,
+    "CHIEF OFFICER": 7,
+    "2ND OFFICER": 8,
+    "2 ND OFFICER": 8,
+    "3RD OFFICER": 9,
+    "3 RD OFFICER": 9,
+    "CHIEF ENGINEER": 10,
+    "2ND ENGINEER": 11,
+    "2 ND ENGINEER": 11,
+    "3RD ENGINEER": 12,
+    "ELECTRICIAN": 13,
+    "BOSUN": 14,
+    "PUMPMAN": 15,
+    "AB": 16,
+    "ABLE SEAMAN": 16,
+    "ABLE SEAFARER DECK": 16,
+    "OS": 17,
+    "O/S": 17,
+    "ORDINARY SEAMAN": 17,
+    "FITTER": 18,
+    "OILER": 19,
+    "ABLE SEAFARER ENGINE": 19,
+    "MOTORMAN": 19,
+    "WIPER": 20,
+    "COOK": 21,
+    "STEWARD": 22,
+    "CADET": 23
+}
+
+def get_rank_column(rank_str: str) -> int:
+    norm = rank_str.strip().upper()
+    for key, col in RANK_TO_COLUMN_MAP.items():
+        if key == norm or key in norm:
+            return col
+    return 6
+
 def load_rules_from_excel(filepath: str, rank: str, is_tanker: bool = False) -> Dict[str, str]:
-    """Excel 35-101 matrisinden rütbenin zorunlu (X) ve atamaya bağlı (D) kurallarını çeker."""
     try:
         wb = openpyxl.load_workbook(filepath, data_only=True)
         ws = wb["DOC_MATRIX"] if "DOC_MATRIX" in wb.sheetnames else wb.active
+        rank_col = get_rank_column(rank)
         
-        target_rank = rank.strip().upper()
-        rank_col = 6  # Varsayılan Master (Kolon F)
-        
-        for col in range(6, 24):
-            val = ws.cell(row=9, column=col).value
-            if val and target_rank in str(val).strip().upper():
-                rank_col = col
-                break
-                
         rules = {}
         for row_idx, code in MATRIX_ROW_TO_CODE.items():
             req_val = ws.cell(row=row_idx, column=rank_col).value
@@ -82,70 +109,54 @@ def load_rules_from_excel(filepath: str, rank: str, is_tanker: bool = False) -> 
                     if "TANKER" in code and not is_tanker:
                         continue
                     rules[code] = req_str
-
         return rules
     except Exception as e:
         print(f"Kural okuma hatası: {e}")
         return {}
 
 def _check_evidence_dates(evidence: Evidence) -> Tuple[str, str]:
-    """Tarih geçerliliğini ve PSC süre sınırlarını denetler."""
     now = datetime.now()
-    
-    # 1. Sarı Humma ömür boyu geçerlidir
     if evidence.code == "YELLOW_FEVER":
         return "OK", "Geçerli (Süresiz)"
 
-    # 2. BTM / BRM için 5 Yıl Kuralı Denetimi
     if evidence.code == "BRM_BTM" and evidence.issue_date:
         diff_years = (now - evidence.issue_date).days / 365.25
         if diff_years > 5:
             return "REVIEW", "5 Yıldan Eski - Yenileme Gerekebilir"
         return "OK", "Geçerli (Son 5 Yıl İçinde)"
 
-    # 3. Süresi Dolmuş Belge Kontrolü
     if evidence.expiry_date:
         if evidence.expiry_date < now:
             return "EXPIRED", f"Süresi Dolmuş ({evidence.expiry_date.strftime('%d.%m.%Y')})"
         return "OK", "Geçerli"
 
-    # 4. Sadece Alınış Tarihi Olan Süresiz Sertifikalar (ECDIS Generic, Diploma vb.)
     if evidence.issue_date and not evidence.expiry_date:
         return "OK", "Geçerli (Süresiz)"
 
     return "REVIEW", "Tarih Bilgisi Doğrulanmalı"
 
 def evaluate(evidences: List[Evidence], rank: str, excel_path: str, is_tanker: bool = False) -> List[Result]:
-    """Tüm kanıtları rütbe kuralları ile karşılaştırıp kesin denetim sonuçlarını üretir."""
     rules = load_rules_from_excel(excel_path, rank, is_tanker)
     results = []
-
-    # Kanıtları kodlarına göre indeksle
-    ev_map: Dict[str, Evidence] = {}
-    for ev in evidences:
-        ev_map[ev.code] = ev
+    ev_map: Dict[str, Evidence] = {ev.code: ev for ev in evidences}
 
     for req_code, rule_type in rules.items():
         evidence = ev_map.get(req_code)
-
-        # Karşılıklı tamamlama: RADAR yoksa ARPA varsa karşılama kontrolü
         if not evidence and req_code == "RADAR" and ev_map.get("ARPA"):
             evidence = ev_map.get("ARPA")
 
         if not evidence:
-            if rule_type == 'D':
+            if rule_type == "D":
                 results.append(Result(code=req_code, status="OK", message="Atamaya Bağlı - Belge Yok", evidence_used=None))
             else:
                 results.append(Result(code=req_code, status="MISSING", message="Zorunlu Belge Eksik", evidence_used=None))
             continue
 
         status, msg = _check_evidence_dates(evidence)
-
         if status == "EXPIRED":
             results.append(Result(code=req_code, status="EXPIRED", message=msg, evidence_used=evidence))
             continue
 
-        # Harici belgede operatör onayı henüz verilmediyse
         if not evidence.verified:
             results.append(Result(code=req_code, status="REVIEW", message="Orijinalden Doğrulanmalı", evidence_used=evidence))
             continue
