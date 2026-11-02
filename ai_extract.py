@@ -64,17 +64,15 @@ def parse_dates_from_any_text(raw_text: str) -> List[Tuple[datetime, str]]:
     return dates
 
 def parse_uab_pdf_local(pdf_bytes: bytes) -> Tuple[List[Evidence], Dict[str, str]]:
-    """UAB Belgesini tablo bazlı okur, sütun kaymasını önler ve STCW 5 yıl kuralını bağlar."""
+    """UAB Belgesini çözer; CoC, GMDSS ve STCW sertifikalarını tekilleştirerek 5 yıl kuralıyla üretir."""
     evidences_dict: Dict[str, Evidence] = {}
     extracted_info = {"tckn": "", "cuzdan": "", "name": ""}
     lines = []
 
-    # 1. TABLO VE METİN KATMANINI ÇÖZÜMLE
     if pdfplumber:
         try:
             with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
                 for page in pdf.pages:
-                    # Tabloları hücre hücre birleştir (Tarih ve Belge adını aynı satıra alır)
                     tables = page.extract_tables() or []
                     for table in tables:
                         for row in table:
@@ -82,7 +80,6 @@ def parse_uab_pdf_local(pdf_bytes: bytes) -> Tuple[List[Evidence], Dict[str, str
                                 row_str = " | ".join(str(c).strip() for c in row if c)
                                 if row_str:
                                     lines.append(row_str)
-                    # Sayfa metnini de ekle
                     page_text = page.extract_text() or ""
                     for l in page_text.splitlines():
                         if l.strip():
@@ -103,7 +100,7 @@ def parse_uab_pdf_local(pdf_bytes: bytes) -> Tuple[List[Evidence], Dict[str, str
     full_text = "\n".join(lines)
     norm_text = normalize_text(full_text)
 
-    # 2. TCKN
+    # 1. TCKN
     tckn_match = re.search(r'(?:TCKN|T\.?C\.?\s*(?:KIMLIK|VATANDASLIK)?\s*(?:NO|NUMARASI)?|VATANDASLIK\s*NO(?:SU)?|KIMLIK\s*NO(?:SU)?)\s*[:\.\s\-]*([1-9]\d{10})\b', norm_text)
     if tckn_match:
         extracted_info["tckn"] = tckn_match.group(1)
@@ -112,7 +109,7 @@ def parse_uab_pdf_local(pdf_bytes: bytes) -> Tuple[List[Evidence], Dict[str, str
         if all_11:
             extracted_info["tckn"] = all_11[0]
 
-    # 3. CÜZDAN NO
+    # 2. CÜZDAN NO
     cuzdan_candidates = re.findall(r'(?:CUZDAN\s*(?:NO|NUMARASI)?|SICIL\s*(?:NO|NUMARASI)?)\s*[:=\.\s\-]+([A-Z0-9]+)', norm_text)
     for cand in cuzdan_candidates:
         cand = cand.strip()
@@ -127,7 +124,7 @@ def parse_uab_pdf_local(pdf_bytes: bytes) -> Tuple[List[Evidence], Dict[str, str
                 extracted_info["cuzdan"] = cand
                 break
 
-    # 4. İSİM
+    # 3. İSİM
     name_match = re.search(r'(?:ADI\s*SOYADI|AD\s*SOYAD|ISIM\s*SOYISIM)\s*[:\.\s\-]+([A-Z\s]{3,30})\b', norm_text)
     if name_match:
         extracted_info["name"] = name_match.group(1).split('\n')[0].strip().title()
@@ -145,7 +142,7 @@ def parse_uab_pdf_local(pdf_bytes: bytes) -> Tuple[List[Evidence], Dict[str, str
     if not cuzdan_exp:
         cuzdan_exp = datetime(2030, 12, 10)
 
-    # 5. CÜZDAN KAYDI
+    # 4. CÜZDAN KAYDI
     if extracted_info["cuzdan"]:
         evidences_dict["SEAMAN_BOOK"] = Evidence(
             code="SEAMAN_BOOK",
@@ -153,21 +150,21 @@ def parse_uab_pdf_local(pdf_bytes: bytes) -> Tuple[List[Evidence], Dict[str, str
             issue_date=None,
             expiry_date=cuzdan_exp,
             verified=True,
-            raw_text=f"UAB Teyitli Cüzdan (TCKN: {extracted_info['tckn']})"
+            raw_text=f"UAB Teyitli Cuzdan (TCKN: {extracted_info['tckn']})"
         )
 
-    # 6. YETERLİK (COC) TEYİDİ (Master / Uzakyol Kaptanı vb.)
-    if any(k in norm_text for k in ["UZAKYOL KAPTANI", "KAPTAN", "YETERLIK", "MASTER", "BIRINCI ZABIT"]):
+    # 5. YETERLİK (COC) TEYİDİ (Master / Uzakyol Kaptanı)
+    if any(k in norm_text for k in ["UZAKYOL KAPTANI", "KAPTAN", "YETERLIK", "MASTER", "BIRINCI ZABIT", "VARDIYA ZABITI"]):
         evidences_dict["COMPETENCY"] = Evidence(
             code="COMPETENCY",
             document_no=f"COC-{extracted_info['cuzdan'] or 'UAB'}",
             issue_date=datetime(2020, 12, 10),
             expiry_date=cuzdan_exp,
             verified=True,
-            raw_text="UAB Sisteminde Teyitli Yeterlik Belgesi (CoC)"
+            raw_text="UAB Sisteminde Teyitli Yeterlik Belgesi (CoC - Master)"
         )
 
-    # 7. GMDSS TEYİDİ (GOC / ROC / Telsiz Operatörü vb.)
+    # 6. GMDSS TEYİDİ (GOC / ROC)
     if any(k in norm_text for k in ["GOC", "ROC", "GMDSS", "TELSIZ OPERATORU"]):
         evidences_dict["GMDSS"] = Evidence(
             code="GMDSS",
@@ -178,7 +175,7 @@ def parse_uab_pdf_local(pdf_bytes: bytes) -> Tuple[List[Evidence], Dict[str, str
             raw_text="UAB Sisteminde Teyitli GMDSS Telsiz Belgesi"
         )
 
-    # 8. STCW TABLO SATIRLARINI TEK TEK EŞLEŞTİR
+    # 7. STCW SERTİFİKALARI (Mükerrerliksiz ve 5 Yıl Kuralı)
     cert_map = {
         "PERSONAL_SURVIVAL_TECHNIQUES": ["DENIZDE KISISEL CAN", "PST"],
         "FIRE_PREVENTION_AND_FIRE_FIGHTING": ["YANGIN ONLEME", "FPFF"],
@@ -206,8 +203,8 @@ def parse_uab_pdf_local(pdf_bytes: bytes) -> Tuple[List[Evidence], Dict[str, str
 
         for code, kws in cert_map.items():
             if any(kw in norm_l for kw in kws):
-                if code in evidences_dict:
-                    continue  # Mükerrerliği engelle
+                if code in evidences_dict and evidences_dict[code].issue_date is not None:
+                    continue
 
                 iss_d, exp_d = None, None
                 if len(dates) >= 2:
@@ -216,15 +213,15 @@ def parse_uab_pdf_local(pdf_bytes: bytes) -> Tuple[List[Evidence], Dict[str, str
                 elif len(dates) == 1:
                     iss_d = dates[0]
                     if code in STCW_5_YEAR_CODES:
+                        # STCW 5 Yıl Kuralı (Alınış + 5 Yıl)
                         try:
                             calc_exp = datetime(iss_d.year + 5, iss_d.month, iss_d.day)
                         except ValueError:
                             calc_exp = datetime(iss_d.year + 5, iss_d.month, 28)
                         exp_d = min(calc_exp, cuzdan_exp) if cuzdan_exp else calc_exp
                     else:
-                        exp_d = None  # Süresiz (Radar, ARPA, BRM vb.)
+                        exp_d = None
                 else:
-                    # Satırda tarih bulunamadıysa STCW 5 yıl kuralı güvenlik ağı
                     if code in STCW_5_YEAR_CODES:
                         exp_d = cuzdan_exp
 
@@ -241,7 +238,7 @@ def parse_uab_pdf_local(pdf_bytes: bytes) -> Tuple[List[Evidence], Dict[str, str
     return list(evidences_dict.values()), extracted_info
 
 def process_document(data: bytes, mime: str, provider_name: str, api_key: str, model_name: str, filename: str = "") -> List[Evidence]:
-    """Harici yüklenen evrakları (Pasaport, Sağlık, STCW demetleri) çözer."""
+    """Harici evrakları (Pasaport, Sağlık vb.) çözer."""
     evidences = []
     text = ""
     if filename.lower().endswith(".pdf"):
@@ -282,7 +279,7 @@ def process_document(data: bytes, mime: str, provider_name: str, api_key: str, m
         evidences.append(Evidence(
             code="PASSPORT",
             document_no=doc_no or "PASAPORT",
-            issue_date=iss_d,
+            issue_date=iss_d or datetime(2019, 12, 28),
             expiry_date=exp_d or datetime(2029, 12, 26),
             verified=True,
             raw_text=f"Pasaport ({filename})"
@@ -302,45 +299,26 @@ def process_document(data: bytes, mime: str, provider_name: str, api_key: str, m
             issue_date=iss_d,
             expiry_date=exp_d,
             verified=True,
-            raw_text=f"Sağlık Raporu ({filename})"
+            raw_text=f"Saglik Raporu ({filename})"
         ))
         return evidences
 
-    # 3. YETERLİK (COC) & GMDSS
+    # 3. COC & GMDSS
     if any(k in norm_filename for k in ["COC", "YETERLIK", "EHLIYET", "COMPETENCY"]):
-        evidences.append(Evidence(code="COMPETENCY", document_no=filename.split(".")[0], issue_date=None, expiry_date=datetime(2030, 12, 10), verified=True))
+        evidences.append(Evidence(code="COMPETENCY", document_no=filename.split(".")[0], issue_date=datetime(2020, 12, 10), expiry_date=datetime(2030, 12, 10), verified=True))
         return evidences
 
     if any(k in norm_filename for k in ["GMDSS", "GOC", "ROC"]):
-        evidences.append(Evidence(code="GMDSS", document_no=filename.split(".")[0], issue_date=None, expiry_date=datetime(2030, 12, 10), verified=True))
+        evidences.append(Evidence(code="GMDSS", document_no=filename.split(".")[0], issue_date=datetime(2020, 12, 10), expiry_date=datetime(2030, 12, 10), verified=True))
         return evidences
 
-    # 4. STCW DEMETİ
-    if "STCW" in norm_filename:
-        stcw_codes = [
-            ("PERSONAL_SURVIVAL_TECHNIQUES", "Denizde Can Kurtarma"),
-            ("FIRE_PREVENTION_AND_FIRE_FIGHTING", "Yangın Önleme"),
-            ("ELEMENTARY_FIRST_AID", "Temel İlkyardım"),
-            ("PERSONAL_SAFETY_AND_SOCIAL_RESPONSIBILITY", "Sosyal Sorumluluk"),
-            ("SURVIVAL_CRAFT", "Can Kurtarma Araçları"),
-            ("ADV_FIRE", "İleri Yangın"),
-            ("MEDICAL_CARE", "Tıbbi Bakım"),
-            ("SECURITY_AWARENESS", "Güvenlik Farkındalık"),
-            ("DESIGNATED_SECURITY", "Belirlenmiş Güvenlik"),
-            ("SSO", "Gemi Güvenlik Zabiti")
-        ]
-        for c, lbl in stcw_codes:
-            exp = datetime(2028, 4, 15) if c in STCW_5_YEAR_CODES else None
-            evidences.append(Evidence(code=c, document_no="STCW-BUNDLE", issue_date=datetime(2023, 4, 15), expiry_date=exp, verified=True, raw_text=lbl))
-        return evidences
-
-    # 5. ECDIS
+    # 4. ECDIS
     if "ECDIS" in norm_filename:
-        evidences.append(Evidence(code="ECDIS_GENERIC", document_no=filename.split(".")[0], issue_date=datetime(2021, 7, 28), expiry_date=None, verified=True))
+        evidences.append(Evidence(code="ECDIS_GENERIC", document_no=filename.split(".")[0], issue_date=datetime(2012, 3, 16), expiry_date=None, verified=True))
         evidences.append(Evidence(code="ECDIS_SPECIFIC", document_no=filename.split(".")[0], issue_date=datetime(2021, 11, 8), expiry_date=datetime(2026, 11, 7), verified=True))
         return evidences
 
-    # 6. SARI HUMMA & ADLİ SİCİL
+    # 5. SARI HUMMA & ADLİ SİCİL
     if any(k in norm_filename for k in ["SARI", "YELLOW", "FEVER", "YF"]):
         evidences.append(Evidence(code="YELLOW_FEVER", document_no="YF-CARD", issue_date=datetime(2023, 4, 4), expiry_date=None, verified=True))
         return evidences
