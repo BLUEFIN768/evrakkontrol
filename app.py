@@ -2,6 +2,7 @@ import streamlit as st
 import io
 import os
 import zipfile
+import tempfile
 from datetime import datetime
 from crew_core import Evidence, evaluate
 from ai_extract import process_document, parse_uab_pdf_local
@@ -83,7 +84,6 @@ with st.container(border=True):
             with st.spinner("UAB Belgesi çözümleniyor..."):
                 uab_evs, ext_info = parse_uab_pdf_local(uab_file.getvalue())
                 if uab_evs or ext_info["tckn"] or ext_info["cuzdan"]:
-                    # Eski UAB kayıtlarını temizle ve yenilerini yükle (Oturum kilidini çözer)
                     st.session_state.evidences = uab_evs
                     if ext_info["tckn"]: st.session_state.auto_tckn = ext_info["tckn"]
                     if ext_info["cuzdan"]: st.session_state.auto_cuzdan = ext_info["cuzdan"]
@@ -124,7 +124,6 @@ if st.session_state.uab_verified:
             st.markdown("**Harici Evrak Yükleme** (Pasaport, Sağlık, STCW vb.)")
             ext_files = st.file_uploader("Harici Evrakları Seç veya Sürükle", accept_multiple_files=True, key="ext_uploader")
             
-            # Otomatik İşleme: Dosyalar bırakıldığı anda işlenir
             if ext_files:
                 for f in ext_files:
                     ev_list = process_document(f.getvalue(), f.type or "application/pdf", "local", "", "", f.name)
@@ -196,7 +195,6 @@ if st.session_state.uab_verified:
                     
                     personel_info = {"name": p_name or "Personel", "rank": p_rank, "vessel": p_vessel or "Belirtilmedi", "date": datetime.now().strftime("%d.%m.%Y")}
                     try:
-                        import tempfile
                         word_template = "templates/35-102.docx" if os.path.exists("templates/35-102.docx") else "35-102.docx"
                         with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp_excel:
                             fill_excel(excel_template_path, tmp_excel.name, st.session_state.results, personel_info)
